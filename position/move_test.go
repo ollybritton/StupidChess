@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestParseMove tests that moves can correctly be parsed.
-func TestParseMove(t *testing.T) {
+// TestParseMoveValid tests that moves can correctly be parsed.
+func TestParseMoveValid(t *testing.T) {
 	tests := []struct {
 		in                string
 		expectedFrom      uint8
@@ -28,5 +28,19 @@ func TestParseMove(t *testing.T) {
 		assert.Equal(t, test.expectedFrom, move.From)
 		assert.Equal(t, test.expectedTo, move.To)
 		assert.Equal(t, test.expectedPromotion, move.Promotion)
+	}
+}
+
+// TestParseMoveInvalid tests that an invalid move will cause an error.
+func TestParseMoveInvalid(t *testing.T) {
+	tests := []string{
+		// "beans",
+		"",
+		// "e9b1p",
+	}
+
+	for _, test := range tests {
+		_, err := ParseMove(test)
+		assert.Error(t, err, "expected invalid move for %s", test)
 	}
 }

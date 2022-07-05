@@ -4,6 +4,10 @@ package position
 // E.g. SquareE4 -> "e4"
 // The function for the opposite is StringToSquare.
 func SquareToString(square uint8) string {
+	if square > 63 {
+		return "?"
+	}
+
 	return squareStringMap[square]
 }
 

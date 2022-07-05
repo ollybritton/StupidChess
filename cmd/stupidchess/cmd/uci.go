@@ -16,13 +16,11 @@ import (
 // uciCmd represents the uci command
 var uciCmd = &cobra.Command{
 	Use:   "uci",
-	Short: "Start a UCI interface",
+	Short: "start a UCI interface",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("uci called")
-
 		engineName := getEngine(cmd)
-		fmt.Println(engineName)
+		fmt.Println("stupidchess ~", engineName)
 
 		uci.Listen(os.Stdin, engines.NewEngineTryHard())
 	},

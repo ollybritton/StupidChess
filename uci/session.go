@@ -33,13 +33,21 @@ func (s *Session) Handle(commandLine string) error {
 	var handler func(arguments []string) error
 
 	switch commandName {
+	//
 	case "uci":
 		handler = s.handleCommandUci
 	case "isready":
 		handler = s.handleCommandIsReady
 	case "position":
 		handler = s.handleCommandPosition
+
+	// Special debugging commands not in the UCI protocol
+	case "_pp", "_prettyprint":
+		handler = s.handleCommandPrettyPrint
+
+	// Handle unknown commands
 	default:
+		fmt.Printf("info string don't understand %s", commandName)
 		handler = s.handleCommandUnknown
 	}
 
@@ -105,19 +113,22 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 			return fmt.Errorf("invalid position command sent %q, can't understand move %q: %w", strings.Join(arguments, " "), move, err)
 		}
 
-		fmt.Println(parsed)
-
 		pos.MakeMove(parsed)
 	}
 
 	s.positions = append(s.positions, pos)
 
-	fmt.Println(s.positions[0].PrettyPrint())
-	fmt.Println(moves)
-
 	return nil
 }
 
 func (s *Session) handleCommandUnknown(arguments []string) error {
+	return nil
+}
+
+func (s *Session) handleCommandPrettyPrint(arguments []string) error {
+	fmt.Println("")
+	fmt.Println(s.positions[len(s.positions)-1].PrettyPrint())
+	fmt.Println("")
+
 	return nil
 }

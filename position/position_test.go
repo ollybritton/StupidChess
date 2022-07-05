@@ -92,19 +92,96 @@ func TestValidMoves(t *testing.T) {
 	}{
 		{
 			"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-			[]string{"e2e4", "e7e5"},
+			[]string{
+				"e2e4",
+				"e7e5",
+			},
 			"rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
 		},
 		{
 			"4k3/1P6/8/8/8/8/8/4K3 w - - 0 1",
-			[]string{"b7b8q"},
+			[]string{
+				"b7b8q",
+			},
 			"1Q2k3/8/8/8/8/8/8/4K3 b - - 0 1",
 		},
 		{
 			"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
-			[]string{"e2e4", "e7e5", "f1c4", "f8c5", "g1f3", "g8f6", "d1e2", "d8e7", "b2b3", "b7b6", "c1b2", "c8b7", "b1a3", "b8a6"},
+			[]string{
+				"e2e4",
+				"e7e5",
+				"f1c4",
+				"f8c5",
+				"g1f3",
+				"g8f6",
+				"d1e2",
+				"d8e7",
+				"b2b3",
+				"b7b6",
+				"c1b2",
+				"c8b7",
+				"b1a3",
+				"b8a6",
+			},
 			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
 		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
+			[]string{
+				"e1d1",
+			},
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R2K3R b kq - 5 8",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
+			[]string{
+				"e1c1",
+			},
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/2KR3R b kq - 5 8",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
+			[]string{
+				"e1g1",
+			},
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R4RK1 b kq - 5 8",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
+			[]string{
+				"a1b1",
+			},
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/1R2K2R b Kkq - 5 8",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
+			[]string{
+				"h1f1",
+			},
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3KR2 b Qkq - 5 8",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R b KQkq - 0 8",
+			[]string{
+				"e8f8",
+			},
+			"r4k1r/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R w KQ - 1 9",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R b KQkq - 0 8",
+			[]string{
+				"e8g8",
+			},
+			"r4rk1/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R w KQ - 1 9",
+		},
+		{
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R b KQkq - 0 8",
+			[]string{
+				"e8c8",
+			},
+			"2kr3r/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R w KQ - 1 9",
+		},
+
 		// TODO: add tests here to check all 6 special cases described in the MakeMove function
 	}
 

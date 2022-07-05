@@ -280,7 +280,10 @@ func (p *Position) PrettyPrint() string {
 	var out bytes.Buffer
 
 	divider := strings.Repeat("-", 33) + "\n"
-	out.WriteString("     ")
+
+	out.WriteString(fmt.Sprintf("To move: %s, Castling status: %s, En passant target: %s", p.SideToMove, p.Castling, SquareToString(p.EnPassant)))
+
+	out.WriteString("\n     ")
 	out.WriteString(divider)
 
 	for i := 7; i >= 0; i-- {
@@ -348,7 +351,7 @@ func (p *Position) MakeMove(m Move) error {
 				p.Squares[SquareF8] = BlackRook
 				p.Squares[SquareH8] = Empty
 			} else { // Long castle
-				p.Squares[SquareD8] = WhiteRook
+				p.Squares[SquareD8] = BlackRook
 				p.Squares[SquareA8] = Empty
 			}
 		}
