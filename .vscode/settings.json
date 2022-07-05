@@ -1,5 +1,4 @@
 {
-    "favorites.resources": [
-        "board/board.go"
-    ]
+  "favorites.resources": ["board/board.go"],
+  "cSpell.enabled": false
 }

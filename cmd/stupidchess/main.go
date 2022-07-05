@@ -21,22 +21,18 @@ THE SOFTWARE.
 */
 package main
 
-import (
-	"fmt"
-
-	"github.com/ollybritton/StupidChess/board"
-)
+import "github.com/ollybritton/StupidChess/cmd/stupidchess/cmd"
 
 func main() {
-	// cmd.Execute()
+	cmd.Execute()
 
-	test := "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1"
+	// test := "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1"
 
-	b, err := board.NewPositionFromFEN(test)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	// b, err := board.NewPositionFromFEN(test)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
 
-	fmt.Println(b.PrettyPrint())
+	// fmt.Println(b.PrettyPrint())
 }

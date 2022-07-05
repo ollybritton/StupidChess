@@ -1,5 +1,7 @@
-package board
+package position
 
+// CastlingAvailability stores information about whether either player can castle in the current position.
+//   0b0000XYZW
 type CastlingAvailability uint8
 
 const (
@@ -36,6 +38,16 @@ func (c CastlingAvailability) String() string {
 	}
 
 	return out
+}
+
+// off disables a type of castling.
+func (c *CastlingAvailability) off(castlingType CastlingAvailability) {
+	(*c) &= ^castlingType
+}
+
+// on enables a type of castling.
+func (c *CastlingAvailability) on(castlingType CastlingAvailability) {
+	(*c) |= castlingType
 }
 
 // castlingAvailabilityFromString returns a CastlingAvailability from a FEN-formatted castling string.

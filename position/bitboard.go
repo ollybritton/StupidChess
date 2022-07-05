@@ -1,4 +1,4 @@
-package board
+package position
 
 type Bitboard uint64
 

@@ -1,4 +1,4 @@
-package board
+package position
 
 import (
 	"bytes"
@@ -54,14 +54,17 @@ func NewPositionFromFEN(input string) (*Position, error) {
 	kingLocation := [2]uint8{}
 
 	// Iterate through the given ranks, writing to the squares array and saving the location of the king.
+	// Ranks are given from the top down, starting with the black pieces.
 	occupied := [2]Bitboard{}
 	pieces := [6]Bitboard{}
-	for y, rank := range ranks {
-		var x int = y * 8
+
+	for y := 0; y < 8; y++ {
+		rank := ranks[y]
+		var x int = (7 - y) * 8
 		var i int
 
 		if len(rank) <= 0 || len(rank) > 8 {
-			return nil, fmt.Errorf("invalid FEN, rank %v is too long", rank)
+			return nil, fmt.Errorf("invalid FEN, rank %q is too long", rank)
 		}
 
 		for i != len(rank) {
@@ -134,9 +137,9 @@ func NewPositionFromFEN(input string) (*Position, error) {
 			i++
 			x++
 
-			if x > (y*8)+8 {
-				return nil, fmt.Errorf("invalid FEN string %v, rank is too long", input)
-			}
+			// if x > (y*8)+8 {
+			// 	return nil, fmt.Errorf("invalid FEN string %v, rank is too long", input)
+			// }
 		}
 	}
 
@@ -258,7 +261,7 @@ func (b *Position) StringFEN() string {
 func (p *Position) PrettyPrint() string {
 	ranks := []string{}
 
-	for y := 7; y >= 0; y-- {
+	for y := 0; y < 8; y++ {
 		pieces := []string{}
 
 		for i := (y * 8); i < (y*8)+8; i++ {
@@ -280,9 +283,10 @@ func (p *Position) PrettyPrint() string {
 	out.WriteString("     ")
 	out.WriteString(divider)
 
-	for i, rank := range ranks {
+	for i := 7; i >= 0; i-- {
+		rank := ranks[i]
 		out.WriteString("  ")
-		out.WriteString(fmt.Sprint(8 - i))
+		out.WriteString(fmt.Sprint(i))
 		out.WriteString("  ")
 		out.WriteString(rank)
 		out.WriteString("\n     ")
@@ -293,6 +297,112 @@ func (p *Position) PrettyPrint() string {
 	out.WriteString("       A   B   C   D   E   F   G   H")
 
 	return out.String()
+}
+
+// MakeMove makes a move on the chess board, or returns an error if it is invalid.
+func (p *Position) MakeMove(m Move) error {
+	// TODO: check if the move specified is valid by seeing if it's in the legal moves list
+
+	// Need to handle 6 special cases:
+	// - White king castling
+	// - Black king castling
+	// (These two cases move two pieces at once)
+
+	// - White rook moving
+	// - Black rook moving
+	// (These two cases mean some castling privileges may be lost)
+
+	// - White pawn moving forward two squares onto an empty square
+	// - Black pawn moving forward two squares onto an empty square
+	// (These two cases either perform an en passant capture or set the en passant target square)
+
+	movingPiece := p.Squares[m.From]
+	var newEnPassantTarget uint8
+
+	switch {
+	case movingPiece == WhiteKing:
+		// Disable any type of castling for the white king as they have moved.
+		p.Castling.off(longW | shortW)
+
+		// The king has moved two squares and so it is known they have castled.
+		// Here we only need to worry about moving the rook, as the king is moved by the general code outside of the switch.
+		if abs(int(m.From)-int(m.To)) == 2 {
+			// Determine if they have castled long or short.
+			if m.To == SquareG1 { // Short castle
+				p.Squares[SquareF1] = WhiteRook
+				p.Squares[SquareH1] = Empty
+			} else { // Long castle
+				p.Squares[SquareD1] = WhiteRook
+				p.Squares[SquareA1] = Empty
+			}
+		}
+	case movingPiece == BlackKing:
+		// Disable any type of castling for the black king as they have moved.
+		p.Castling.off(longB | shortB)
+
+		// The king has moved two squares and so it is known they have castled.
+		// Here we only need to worry about moving the rook, as the king is moved by the general code outside of the switch.
+		if abs(int(m.From)-int(m.To)) == 2 {
+			// Determine if they have castled long or short.
+			if m.To == SquareG8 { // Short castle
+				p.Squares[SquareF8] = BlackRook
+				p.Squares[SquareH8] = Empty
+			} else { // Long castle
+				p.Squares[SquareD8] = WhiteRook
+				p.Squares[SquareA8] = Empty
+			}
+		}
+	case movingPiece == WhiteRook:
+		// Disable castling for the king on the side where the rook has moved.
+		if m.From == SquareA1 {
+			p.Castling.off(longW)
+		} else {
+			p.Castling.off(shortW)
+		}
+	case movingPiece == BlackRook:
+		// Disable castling for the king on the side where the rook has moved.
+		if m.From == SquareA8 {
+			p.Castling.off(longB)
+		} else {
+			p.Castling.off(shortB)
+		}
+	case movingPiece == WhitePawn && p.Squares[m.To] == Empty:
+		if m.To-m.From == 16 {
+			// The pawn has moved two full squares onto an empty square.
+			// Therefore there is a new en passant target on the rank between its original position and its new position.
+			newEnPassantTarget = m.From + 8
+		} else if m.To-m.From == 7 || m.To-m.From == 9 {
+			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
+			p.Squares[m.From+8] = Empty
+		}
+	case movingPiece == BlackPawn && p.Squares[m.To] == Empty:
+		if m.From-m.To == 16 {
+			// The pawn has moved two full squares onto an empty square.
+			// Therefore there is a new en passant target on the rank between its original position and its new position.
+			newEnPassantTarget = m.To + 8
+		} else if m.From-m.To == 7 || m.From-m.To == 9 {
+			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
+			p.Squares[m.To+8] = Empty
+		}
+	}
+
+	p.EnPassant = newEnPassantTarget
+	fmt.Println("setting to empty", m.From)
+	fmt.Println(p.Squares[4])
+	p.Squares[m.From] = Empty
+
+	if m.Promotion == Empty {
+		p.Squares[m.To] = movingPiece
+	} else {
+		p.Squares[m.To] = m.Promotion
+	}
+
+	// TODO: check if the king is in check at the end of the move
+	// TODO: find out how bitboards are updated here
+
+	p.SideToMove = p.SideToMove.Invert()
+
+	return nil
 }
 
 // HasEnPassant returns true if the current player has a valid en passant move.

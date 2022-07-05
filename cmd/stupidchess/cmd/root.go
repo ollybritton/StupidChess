@@ -23,8 +23,9 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
+
+	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
@@ -35,13 +36,8 @@ var cfgFile string
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "stupidchess",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "A set of chess engines that play chess really badly, really well.",
+	Long:  ``,
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	//	Run: func(cmd *cobra.Command, args []string) { },
@@ -59,11 +55,8 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
-
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.stupidchess.yaml)")
+	rootCmd.PersistentFlags().StringP("engine", "e", "try-hard", "engine to use")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -94,4 +87,15 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
+}
+
+// getEngine returns the currently set engine or prints an error.
+func getEngine(cmd *cobra.Command) string {
+	engineName, err := cmd.Flags().GetString("engine")
+	if err != nil {
+		fmt.Printf("error determining engine in %v command: %v\n", cmd.Use, err)
+		os.Exit(1)
+	}
+
+	return engineName
 }

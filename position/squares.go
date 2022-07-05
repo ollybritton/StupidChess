@@ -1,4 +1,4 @@
-package board
+package position
 
 // SquareToString converts a position on the chess board into its corresponding algebraic chess position.
 // E.g. SquareE4 -> "e4"
