@@ -73,8 +73,55 @@ const (
 	Rook
 	Queen
 	King
+
+	None
 )
 
 func (c Piece) String() string {
 	return string("PNBRQK?"[c])
+}
+
+// OfColor returns the colored version of the piece.
+// E.g. Pawn -> WhitePawn
+//      King -> BlackKing
+func (c Piece) OfColor(color Color) ColoredPiece {
+	if color == White {
+		switch c {
+		case Pawn:
+			return WhitePawn
+		case Knight:
+			return WhiteKnight
+		case Bishop:
+			return WhiteBishop
+		case Rook:
+			return WhiteRook
+		case Queen:
+			return WhiteQueen
+		case King:
+			return WhiteKing
+		}
+	} else {
+		switch c {
+		case Pawn:
+			return BlackPawn
+		case Knight:
+			return BlackKnight
+		case Bishop:
+			return BlackBishop
+		case Rook:
+			return BlackRook
+		case Queen:
+			return BlackQueen
+		case King:
+			return BlackKing
+		}
+	}
+
+	return Empty
+}
+
+// strToPiece returns the associated Piece given a string
+func strToPiece(str string) Piece {
+	str = strings.ToLower(str)
+	return Piece(strings.IndexAny("pnbrqk?", str))
 }

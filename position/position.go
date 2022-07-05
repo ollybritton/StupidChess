@@ -196,7 +196,7 @@ func (b *Position) StringFEN() string {
 	var out bytes.Buffer
 
 	// Ranks
-	for y := 0; y < 8; y++ {
+	for y := 7; y >= 0; y-- {
 		empty := 0
 
 		for x := 0; x < 8; x++ {
@@ -218,7 +218,7 @@ func (b *Position) StringFEN() string {
 			out.WriteString(fmt.Sprint(empty))
 		}
 
-		if y != 7 {
+		if y != 0 {
 			out.WriteString("/")
 		}
 	}
@@ -304,9 +304,9 @@ func (p *Position) MakeMove(m Move) error {
 	// TODO: check if the move specified is valid by seeing if it's in the legal moves list
 
 	// Need to handle 6 special cases:
-	// - White king castling
-	// - Black king castling
-	// (These two cases move two pieces at once)
+	// - White king moving
+	// - Black king moving
+	// (These two cases can move two pieces at once and disable castling)
 
 	// - White rook moving
 	// - Black rook moving
@@ -317,7 +317,7 @@ func (p *Position) MakeMove(m Move) error {
 	// (These two cases either perform an en passant capture or set the en passant target square)
 
 	movingPiece := p.Squares[m.From]
-	var newEnPassantTarget uint8
+	var newEnPassantTarget uint8 = 255
 
 	switch {
 	case movingPiece == WhiteKing:
@@ -387,20 +387,30 @@ func (p *Position) MakeMove(m Move) error {
 	}
 
 	p.EnPassant = newEnPassantTarget
-	fmt.Println("setting to empty", m.From)
-	fmt.Println(p.Squares[4])
 	p.Squares[m.From] = Empty
 
-	if m.Promotion == Empty {
+	if m.Promotion == None {
 		p.Squares[m.To] = movingPiece
 	} else {
-		p.Squares[m.To] = m.Promotion
+		p.Squares[m.To] = m.Promotion.OfColor(p.SideToMove)
 	}
 
 	// TODO: check if the king is in check at the end of the move
 	// TODO: find out how bitboards are updated here
 
 	p.SideToMove = p.SideToMove.Invert()
+
+	// If the side to move is now white, we can update the fullmove clock.
+	if p.SideToMove == White {
+		p.FullMoves += 1
+	}
+
+	// If there has been no capture and it's not a pawn move, then we need to incremement the halfmove clock.
+	if movingPiece != WhitePawn && movingPiece != BlackPawn && p.Squares[m.To] != Empty {
+		p.HalfmoveClock += 1
+	} else {
+		p.HalfmoveClock = 0
+	}
 
 	return nil
 }

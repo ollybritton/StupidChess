@@ -7,26 +7,28 @@ import "fmt"
 type Move struct {
 	From      uint8
 	To        uint8
-	Promotion ColoredPiece
+	Promotion Piece
 }
 
 // ParseMove parses a UCI-style long algebraic notation move into a Move.
 func ParseMove(str string) (Move, error) {
 	var fromString, toString string
-	var promotion ColoredPiece = Empty
+	var promotion Piece = None
 
 	switch len(str) {
 	case 4:
 		fromString = str[0:2]
 		toString = str[2:4]
+
 	case 5:
 		fromString = str[0:2]
 		toString = str[2:4]
-		promotionString := string(str[5])
+		promotionString := string(str[4])
+		promotion = strToPiece(promotionString)
 
-		promotion = strToColored(promotionString)
 	default:
 		return Move{}, fmt.Errorf("invalid move")
+
 	}
 
 	return Move{

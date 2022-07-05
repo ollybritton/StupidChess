@@ -6,9 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestValidFEN ensures that loading a chess game from a FEN string and then outputting the game as a FEN string is the same.
+// TestValidFENInvariant ensures that loading a chess game from a FEN string and then outputting the game as a FEN string is the same.
 // The FEN strings used in this test come from https://gist.github.com/peterellisjones/8c46c28141c162d1d8a0f0badbc9cff9
-func TestValidFEN(t *testing.T) {
+func TestValidFENInvariant(t *testing.T) {
 	tests := []string{
 		"r6r/1b2k1bq/8/8/7B/8/8/R3K2R b KQ - 3 2",
 		"8/8/8/2k5/2pP4/8/B7/4K3 b - d3 0 3",
@@ -37,12 +37,30 @@ func TestValidFEN(t *testing.T) {
 
 	for _, test := range tests {
 		b, err := NewPositionFromFEN(test)
-		if err != nil {
-			t.Errorf("wasn't expecting an error parsing FEN %v, got %v", test, err)
-		}
-
+		assert.NoError(t, err)
 		assert.Equal(t, test, b.StringFEN(), "expecting identical FEN strings")
 	}
+}
+
+// TestFENFull checks that parsing a FEN string gives the correct full chessboard, in order.
+func TestFENFull(t *testing.T) {
+	input := "r6r/1b2k1bq/8/8/7B/8/8/R3K2R b KQ - 3 2"
+
+	// This looks backwards but the array starts at A1.
+	output := [64]ColoredPiece{
+		WhiteRook, Empty, Empty, Empty, WhiteKing, Empty, Empty, WhiteRook,
+		Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty,
+		Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty,
+		Empty, Empty, Empty, Empty, Empty, Empty, Empty, WhiteBishop,
+		Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty,
+		Empty, Empty, Empty, Empty, Empty, Empty, Empty, Empty,
+		Empty, BlackBishop, Empty, Empty, BlackKing, Empty, BlackBishop, BlackQueen,
+		BlackRook, Empty, Empty, Empty, Empty, Empty, Empty, BlackRook,
+	}
+
+	position, err := NewPositionFromFEN(input)
+	assert.NoError(t, err)
+	assert.Equal(t, output, position.Squares)
 }
 
 // TestInvalidFEN makes sure that invalid FEN strings are detected and reported as errors.
@@ -62,5 +80,45 @@ func TestInvalidFen(t *testing.T) {
 	for _, test := range tests {
 		_, err := NewPositionFromFEN(test.fen)
 		assert.Error(t, err, "wanted an error, invalid because %q", test.why)
+	}
+}
+
+// TestValidMoves tests that performing valid moves on the position gives the expected FEN string.
+func TestValidMoves(t *testing.T) {
+	tests := []struct {
+		startingFEN string
+		moves       []string
+		expectedFEN string
+	}{
+		{
+			"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+			[]string{"e2e4", "e7e5"},
+			"rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+		},
+		{
+			"4k3/1P6/8/8/8/8/8/4K3 w - - 0 1",
+			[]string{"b7b8q"},
+			"1Q2k3/8/8/8/8/8/8/4K3 b - - 0 1",
+		},
+		{
+			"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+			[]string{"e2e4", "e7e5", "f1c4", "f8c5", "g1f3", "g8f6", "d1e2", "d8e7", "b2b3", "b7b6", "c1b2", "c8b7", "b1a3", "b8a6"},
+			"r3k2r/pbppqppp/np3n2/2b1p3/2B1P3/NP3N2/PBPPQPPP/R3K2R w KQkq - 4 8",
+		},
+		// TODO: add tests here to check all 6 special cases described in the MakeMove function
+	}
+
+	for _, test := range tests {
+		position, err := NewPositionFromFEN(test.startingFEN)
+		assert.NoError(t, err, "wasn't expecting an error parsing the start position when testing if moves are valid")
+
+		for _, move := range test.moves {
+			parsed, err := ParseMove(move)
+			assert.NoError(t, err, "wasn't expecting an error parsing valid moves")
+
+			position.MakeMove(parsed)
+		}
+
+		assert.Equal(t, test.expectedFEN, position.StringFEN(), "expected FEN to match after moves have been played")
 	}
 }
