@@ -89,17 +89,24 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 
 	if arguments[0] == "startpos" {
 		fen = position.StartingPosition
-		moves = arguments[2:]
+
+		if len(arguments) == 1 {
+			moves = []string{} // i.e. no moves were specified, it was just "position startpos"
+		} else {
+			moves = arguments[2:]
+		}
+
 	} else {
 		all := strings.Join(arguments, " ")
 		movesIndex := strings.Index(all, "moves")
 
 		if movesIndex == -1 {
-			return fmt.Errorf("invalid position command sent, can't find 'moves' substring: %v", all)
+			fen = all
+		} else {
+			fen = all[:movesIndex-1] // Index of 'm', need end position of FEN string.
+			moves = strings.Fields(all[movesIndex+6:])
 		}
 
-		fen = all[:movesIndex-1] // Index of 'm', need end position of FEN string.
-		moves = strings.Fields(all[movesIndex+6:])
 	}
 
 	pos, err := position.NewPositionFromFEN(fen)
