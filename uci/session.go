@@ -40,6 +40,7 @@ func (s *Session) Handle(commandLine string) error {
 		handler = s.handleCommandIsReady
 	case "position":
 		handler = s.handleCommandPosition
+	// TODO: parse 'go' command into SearchOptions
 
 	// Special debugging commands not in the UCI protocol
 	case "_pp", "_prettyprint":
