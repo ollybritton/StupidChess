@@ -12,7 +12,14 @@ import (
 type SearchOptions struct {
 	Infinite    bool            // Don't stop searching until being told to do so.
 	SearchMoves []position.Move // Only explore these moves.
-	Depth       int             // Explore the search tree to this many plies only.
-	Nodes       int             // Only search this many nodes.
+	Depth       uint            // Explore the search tree to this many plies only.
+	Nodes       uint            // Only search this many nodes.
+	Mate        uint            // Search for mate in this many moves.
 	MoveTime    time.Duration   // Only search for the specified duration.
+
+	WhiteTimeRemaining uint    // Time remaining for white in milliseconds.
+	BlackTimeRemaining uint    // Time remaining for black in milliseconds.
+	WhiteIncrement     float64 // Increment for white in seconds.
+	BlackIncrement     float64 // Increment for black in seconds.
+	MovesToGo          uint    // Number of moves until the next time control.
 }

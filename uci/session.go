@@ -2,7 +2,9 @@ package uci
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ollybritton/StupidChess/engines"
 	"github.com/ollybritton/StupidChess/position"
@@ -40,7 +42,8 @@ func (s *Session) Handle(commandLine string) error {
 		handler = s.handleCommandIsReady
 	case "position":
 		handler = s.handleCommandPosition
-	// TODO: parse 'go' command into SearchOptions
+	case "go":
+		handler = s.handleCommandGo
 
 	// Special debugging commands not in the UCI protocol
 	case "_pp", "_prettyprint":
@@ -48,7 +51,7 @@ func (s *Session) Handle(commandLine string) error {
 
 	// Handle unknown commands
 	default:
-		fmt.Printf("info string don't understand %s", commandName)
+		fmt.Printf("info string don't understand %s\n", commandName)
 		handler = s.handleCommandUnknown
 	}
 
@@ -129,14 +132,154 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 	return nil
 }
 
+func (s *Session) handleCommandGo(arguments []string) error {
+	options := engines.SearchOptions{}
+
+	var i int
+
+	for i < len(arguments) {
+		curr := arguments[i]
+
+		switch curr {
+		case "infinite":
+			options.Infinite = true
+
+		case "wtime", "btime":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'wtime/btime' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			millisecondsStr := arguments[i]
+			milliseconds, err := strconv.Atoi(millisecondsStr)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'wtime/btime' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			if curr == "wtime" {
+				options.WhiteTimeRemaining = uint(milliseconds)
+			} else {
+				options.BlackTimeRemaining = uint(milliseconds)
+			}
+
+		case "winc", "binc":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'winc/binc' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			secondsStr := arguments[i]
+			seconds, err := strconv.ParseFloat(secondsStr, 64)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'winc/binc' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			if curr == "winc" {
+				options.WhiteIncrement = seconds
+			} else {
+				options.BlackIncrement = seconds
+			}
+
+		case "movestogo":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'movestogo' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			movesStr := arguments[i]
+			moves, err := strconv.Atoi(movesStr)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'movestogo' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			options.MovesToGo = uint(moves)
+
+		case "depth":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'depth' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			depthStr := arguments[i]
+			depth, err := strconv.Atoi(depthStr)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'depth' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			options.MovesToGo = uint(depth)
+
+		case "nodes":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'nodes' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			nodesStr := arguments[i]
+			nodes, err := strconv.Atoi(nodesStr)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'nodes' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			options.Nodes = uint(nodes)
+
+		case "mate":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'mate' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			mateStr := arguments[i]
+			mate, err := strconv.Atoi(mateStr)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'nodes' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			options.Mate = uint(mate)
+
+		case "movetime":
+			if i == len(arguments)-1 {
+				return fmt.Errorf("expecting number after 'movetime' option in 'go' command 'go %s'", strings.Join(arguments, " "))
+			}
+
+			i++
+			millisecondsStr := arguments[i]
+			milliseconds, err := strconv.Atoi(millisecondsStr)
+
+			if err != nil {
+				return fmt.Errorf("expecting number after 'movetime' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
+			}
+
+			options.MoveTime = time.Millisecond * time.Duration(milliseconds)
+
+		case "ponder", "ponderhit":
+			// TODO: implement ponder command
+			return fmt.Errorf("ponder command currently not supported")
+		}
+
+		i++
+	}
+
+	return nil
+}
+
 func (s *Session) handleCommandUnknown(arguments []string) error {
 	return nil
 }
 
 func (s *Session) handleCommandPrettyPrint(arguments []string) error {
-	fmt.Println("")
-	fmt.Println(s.positions[len(s.positions)-1].PrettyPrint())
-	fmt.Println("")
+	if len(s.positions) == 0 {
+		fmt.Println("nothing to pretty print, no positions yet")
+	} else {
+		fmt.Println("")
+		fmt.Println(s.positions[len(s.positions)-1].PrettyPrint())
+		fmt.Println("")
+	}
 
 	return nil
 }

@@ -181,8 +181,6 @@ func TestValidMoves(t *testing.T) {
 			},
 			"2kr3r/pbppqppp/np3n2/2b1p3/2B1P3/NP1P1N2/PBP1QPPP/R3K2R w KQ - 1 9",
 		},
-
-		// TODO: add tests here to check all 6 special cases described in the MakeMove function
 	}
 
 	for _, test := range tests {
