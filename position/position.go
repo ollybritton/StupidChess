@@ -303,9 +303,7 @@ func (p *Position) PrettyPrint() string {
 }
 
 // MakeMove makes a move on the chess board, or returns an error if it is invalid.
-func (p *Position) MakeMove(m Move) error {
-	// TODO: check if the move specified is valid by seeing if it's in the legal moves list
-
+func (p *Position) MakeMove(m Move) bool {
 	// Need to handle 6 special cases:
 	// - White king moving
 	// - Black king moving
@@ -399,6 +397,12 @@ func (p *Position) MakeMove(m Move) error {
 	}
 
 	// TODO: check if the king is in check at the end of the move
+
+	if p.KingInCheck() {
+		p.UndoMove(m)
+		return false
+	}
+
 	// TODO: find out how bitboards are updated here
 
 	p.SideToMove = p.SideToMove.Invert()
@@ -415,10 +419,46 @@ func (p *Position) MakeMove(m Move) error {
 		p.HalfmoveClock = 0
 	}
 
-	return nil
+	return true
+}
+
+// UndoMove undoes the last move.
+func (p *Position) UndoMove(m Move) {
+}
+
+// KingInCheck returns true if the current side to move has their king in check.
+func (p *Position) KingInCheck() bool {
+	return false
 }
 
 // HasEnPassant returns true if the current player has a valid en passant move.
 func (p *Position) HasEnPassant() bool {
 	return p.EnPassant != 255
+}
+
+// IsEmpty returns true if the specified square is empty.
+func (p *Position) IsEmpty(square uint8) bool {
+	return p.Squares[square] == Empty
+}
+
+// IsValid returns true if the specified square is within the confines of the board.
+func (p *Position) IsValid(square uint8) bool {
+	return square <= 64
+}
+
+// OnRank returns true if the specified square is on the given rank.
+// TODO: write better tests
+func (p *Position) OnRank(square uint8, rank uint8) bool {
+	rank -= 1
+	return square >= 8*rank && square <= 8*rank+7
+}
+
+// OnFileA returns true if the specified square is on the A-file.
+func (p *Position) OnFileA(square uint8) bool {
+	return square%8 == 0
+}
+
+// OnFileH returns true if the specified square is on the H-file.
+func (p *Position) OnFileH(square uint8) bool {
+	return square%8 == 7
 }

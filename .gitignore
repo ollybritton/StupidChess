@@ -87,3 +87,10 @@ Temporary Items
 *.code-workspace
 
 # End of https://www.toptal.com/developers/gitignore/api/go,visualstudiocode,macos
+
+# Custom
+hijack # used for debugging uci
+engine.sh # used for debugging uci
+engine.sh.x # used for debugging uci
+engine.sh.c # used for debugging uci
+logs/

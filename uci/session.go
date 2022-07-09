@@ -2,6 +2,7 @@ package uci
 
 import (
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -152,7 +153,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			millisecondsStr := arguments[i]
 			milliseconds, err := strconv.Atoi(millisecondsStr)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'wtime/btime' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -171,7 +171,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			secondsStr := arguments[i]
 			seconds, err := strconv.ParseFloat(secondsStr, 64)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'winc/binc' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -190,7 +189,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			movesStr := arguments[i]
 			moves, err := strconv.Atoi(movesStr)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'movestogo' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -205,7 +203,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			depthStr := arguments[i]
 			depth, err := strconv.Atoi(depthStr)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'depth' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -220,7 +217,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			nodesStr := arguments[i]
 			nodes, err := strconv.Atoi(nodesStr)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'nodes' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -235,7 +231,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			mateStr := arguments[i]
 			mate, err := strconv.Atoi(mateStr)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'nodes' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -250,7 +245,6 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			i++
 			millisecondsStr := arguments[i]
 			milliseconds, err := strconv.Atoi(millisecondsStr)
-
 			if err != nil {
 				return fmt.Errorf("expecting number after 'movetime' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
@@ -264,6 +258,17 @@ func (s *Session) handleCommandGo(arguments []string) error {
 
 		i++
 	}
+
+	// TODO: remove me
+	if len(s.positions) == 0 {
+		panic("uh-oh")
+	}
+
+	position := s.positions[len(s.positions)-1]
+	moves := position.MovesPseudolegal()
+	move := moves[rand.Intn(len(moves))]
+
+	fmt.Println("bestmove", move)
 
 	return nil
 }

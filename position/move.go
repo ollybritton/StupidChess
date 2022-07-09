@@ -10,6 +10,15 @@ type Move struct {
 	Promotion Piece
 }
 
+// NewMove returns a new move from a from square to a to square.
+func NewMove(from, to uint8, promotion Piece) Move {
+	return Move{
+		From:      from,
+		To:        to,
+		Promotion: promotion,
+	}
+}
+
 // ParseMove parses a UCI-style long algebraic notation move into a Move.
 func ParseMove(str string) (Move, error) {
 	var fromString, toString string
@@ -36,5 +45,9 @@ func ParseMove(str string) (Move, error) {
 		To:        StringToSquare(toString),
 		Promotion: promotion,
 	}, nil
+}
 
+// String returns the long algebraic notation representation of the move.
+func (m Move) String() string {
+	return SquareToString(m.From) + SquareToString(m.To)
 }
