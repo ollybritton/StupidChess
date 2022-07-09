@@ -421,6 +421,61 @@ func (p *Position) MakeMove(m Move) bool {
 
 // UndoMove undoes the last move.
 func (p *Position) UndoMove(m Move) {
+	originalPiece := p.Squares[m.To]
+
+	p.EnPassant = m.PriorEnPassantTarget
+	p.Castling = m.PriorCastling
+
+	p.setSquare(m.To, m.Captured)
+	p.setSquare(m.From, originalPiece)
+
+	if m.Moved.Colorless() == Pawn {
+		if m.To == p.EnPassant {
+			// This was an en passant move, so we need to undo setting m.To to the captured piece above and instead place
+			// the pawns properly.
+			p.setSquare(m.To, Empty)
+
+			switch int(m.To) - int(m.From) {
+			case 7, 9:
+				p.setSquare(m.To-8, BlackPawn)
+			case -7, -9:
+				p.setSquare(m.To+8, WhitePawn)
+			}
+		}
+	} else if m.Moved.Colorless() == King {
+		sideMoving := m.Moved.Color()
+
+		switch int(m.To) - int(m.From) {
+		case 2: // Short castling
+			if sideMoving == White {
+				p.setSquare(SquareH1, WhiteRook)
+				p.setSquare(SquareF1, Empty)
+			} else if sideMoving == Black {
+				p.setSquare(SquareH8, BlackRook)
+				p.setSquare(SquareF8, Empty)
+			}
+
+		case -2: // Long castling
+			if sideMoving == White {
+				p.setSquare(SquareA1, WhiteRook)
+				p.setSquare(SquareD1, Empty)
+			} else if sideMoving == Black {
+				p.setSquare(SquareA8, BlackRook)
+				p.setSquare(SquareD8, BlackRook)
+			}
+		}
+	}
+
+	p.SideToMove = p.SideToMove.Invert()
+
+	// If the side to move is now black, we need to subtract one from the fullmove clock.
+	if p.SideToMove == Black {
+		p.FullMoves -= 1
+	}
+
+	// TODO: update proper recovery of the fullmove and halfmove clock
+
+	return
 }
 
 // KingInCheck returns true if the current side to move has their king in check.

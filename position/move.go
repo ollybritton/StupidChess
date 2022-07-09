@@ -5,9 +5,15 @@ import "fmt"
 // Move represents a chess move.
 // TODO: switch to a more compact binary format.
 type Move struct {
-	From      uint8
-	To        uint8
+	From uint8
+	To   uint8
+
+	Moved     ColoredPiece
 	Promotion Piece
+	Captured  ColoredPiece
+
+	PriorCastling        CastlingAvailability
+	PriorEnPassantTarget uint8
 }
 
 // NewMove returns a new move from a from square to a to square.
