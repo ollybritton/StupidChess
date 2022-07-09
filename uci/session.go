@@ -137,7 +137,7 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 }
 
 func (s *Session) handleCommandGo(arguments []string) error {
-	options := engines.SearchOptions{}
+	options := engines.NewDeafultOptions()
 
 	var i int
 

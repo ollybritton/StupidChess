@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"math"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -22,4 +23,21 @@ type SearchOptions struct {
 	WhiteIncrement     float64 // Increment for white in seconds.
 	BlackIncrement     float64 // Increment for black in seconds.
 	MovesToGo          uint    // Number of moves until the next time control.
+}
+
+// NewDefaultOptions returns the default search options for an engine.
+func NewDeafultOptions() SearchOptions {
+	return SearchOptions{
+		Infinite:           false,
+		SearchMoves:        []position.Move{},
+		Depth:              math.MaxUint,
+		Nodes:              math.MaxUint,
+		Mate:               math.MaxUint,
+		MoveTime:           time.Duration(math.MaxInt64),
+		WhiteTimeRemaining: math.MaxUint,
+		BlackTimeRemaining: math.MaxUint,
+		WhiteIncrement:     math.MaxFloat64,
+		BlackIncrement:     math.MaxFloat64,
+		MovesToGo:          math.MaxUint,
+	}
 }
