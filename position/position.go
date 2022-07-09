@@ -84,53 +84,53 @@ func NewPositionFromFEN(input string) (*Position, error) {
 
 			case 'P':
 				squares[x] = WhitePawn
-				occupied[White].Set(uint(x))
-				pieces[Pawn].Set(uint(x))
+				occupied[White].On(uint8(x))
+				pieces[Pawn].On(uint8(x))
 			case 'p':
 				squares[x] = BlackPawn
-				occupied[Black].Set(uint(x))
-				pieces[Pawn].Set(uint(x))
+				occupied[Black].On(uint8(x))
+				pieces[Pawn].On(uint8(x))
 			case 'N':
 				squares[x] = WhiteKnight
-				occupied[White].Set(uint(x))
-				pieces[Knight].Set(uint(x))
+				occupied[White].On(uint8(x))
+				pieces[Knight].On(uint8(x))
 			case 'n':
 				squares[x] = BlackKnight
-				occupied[Black].Set(uint(x))
-				pieces[Knight].Set(uint(x))
+				occupied[Black].On(uint8(x))
+				pieces[Knight].On(uint8(x))
 			case 'B':
 				squares[x] = WhiteBishop
-				occupied[White].Set(uint(x))
-				pieces[Bishop].Set(uint(x))
+				occupied[White].On(uint8(x))
+				pieces[Bishop].On(uint8(x))
 			case 'b':
 				squares[x] = BlackBishop
-				occupied[Black].Set(uint(x))
-				pieces[Bishop].Set(uint(x))
+				occupied[Black].On(uint8(x))
+				pieces[Bishop].On(uint8(x))
 			case 'R':
 				squares[x] = WhiteRook
-				occupied[White].Set(uint(x))
-				pieces[Rook].Set(uint(x))
+				occupied[White].On(uint8(x))
+				pieces[Rook].On(uint8(x))
 			case 'r':
 				squares[x] = BlackRook
-				occupied[Black].Set(uint(x))
-				pieces[Rook].Set(uint(x))
+				occupied[Black].On(uint8(x))
+				pieces[Rook].On(uint8(x))
 			case 'Q':
 				squares[x] = WhiteQueen
-				occupied[White].Set(uint(x))
-				pieces[Queen].Set(uint(x))
+				occupied[White].On(uint8(x))
+				pieces[Queen].On(uint8(x))
 			case 'q':
 				squares[x] = BlackQueen
-				occupied[Black].Set(uint(x))
-				pieces[Queen].Set(uint(x))
+				occupied[Black].On(uint8(x))
+				pieces[Queen].On(uint8(x))
 			case 'K':
 				squares[x] = WhiteKing
-				occupied[White].Set(uint(x))
-				pieces[King].Set(uint(x))
+				occupied[White].On(uint8(x))
+				pieces[King].On(uint8(x))
 				kingLocation[White] = uint8(x)
 			case 'k':
 				squares[x] = BlackKing
-				occupied[Black].Set(uint(x))
-				pieces[King].Set(uint(x))
+				occupied[Black].On(uint8(x))
+				pieces[King].On(uint8(x))
 				kingLocation[Black] = uint8(x)
 			}
 
@@ -303,6 +303,7 @@ func (p *Position) PrettyPrint() string {
 }
 
 // MakeMove makes a move on the chess board, or returns an error if it is invalid.
+// Bitboards for occupation and piece locations are updated through the setSquare function.
 func (p *Position) MakeMove(m Move) bool {
 	// Need to handle 6 special cases:
 	// - White king moving
@@ -330,11 +331,11 @@ func (p *Position) MakeMove(m Move) bool {
 		if abs(int(m.From)-int(m.To)) == 2 {
 			// Determine if they have castled long or short.
 			if m.To == SquareG1 { // Short castle
-				p.Squares[SquareF1] = WhiteRook
-				p.Squares[SquareH1] = Empty
+				p.setSquare(SquareF1, WhiteRook)
+				p.setSquare(SquareH1, Empty)
 			} else { // Long castle
-				p.Squares[SquareD1] = WhiteRook
-				p.Squares[SquareA1] = Empty
+				p.setSquare(SquareD1, WhiteRook)
+				p.setSquare(SquareA1, Empty)
 			}
 		}
 	case movingPiece == BlackKing:
@@ -346,11 +347,11 @@ func (p *Position) MakeMove(m Move) bool {
 		if abs(int(m.From)-int(m.To)) == 2 {
 			// Determine if they have castled long or short.
 			if m.To == SquareG8 { // Short castle
-				p.Squares[SquareF8] = BlackRook
-				p.Squares[SquareH8] = Empty
+				p.setSquare(SquareF8, BlackRook)
+				p.setSquare(SquareH8, Empty)
 			} else { // Long castle
-				p.Squares[SquareD8] = BlackRook
-				p.Squares[SquareA8] = Empty
+				p.setSquare(SquareD8, BlackRook)
+				p.setSquare(SquareA8, Empty)
 			}
 		}
 	case movingPiece == WhiteRook:
@@ -374,7 +375,7 @@ func (p *Position) MakeMove(m Move) bool {
 			newEnPassantTarget = m.From + 8
 		} else if m.To-m.From == 7 || m.To-m.From == 9 {
 			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
-			p.Squares[m.From+8] = Empty
+			p.setSquare(m.From+8, Empty)
 		}
 	case movingPiece == BlackPawn && p.Squares[m.To] == Empty:
 		if m.From-m.To == 16 {
@@ -383,27 +384,23 @@ func (p *Position) MakeMove(m Move) bool {
 			newEnPassantTarget = m.To + 8
 		} else if m.From-m.To == 7 || m.From-m.To == 9 {
 			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
-			p.Squares[m.To+8] = Empty
+			p.setSquare(m.To+8, Empty)
 		}
 	}
 
 	p.EnPassant = newEnPassantTarget
-	p.Squares[m.From] = Empty
+	p.setSquare(m.From, Empty)
 
 	if m.Promotion == None {
-		p.Squares[m.To] = movingPiece
+		p.setSquare(m.To, movingPiece)
 	} else {
-		p.Squares[m.To] = m.Promotion.OfColor(p.SideToMove)
+		p.setSquare(m.To, m.Promotion.OfColor(p.SideToMove))
 	}
-
-	// TODO: check if the king is in check at the end of the move
 
 	if p.KingInCheck() {
 		p.UndoMove(m)
 		return false
 	}
-
-	// TODO: find out how bitboards are updated here
 
 	p.SideToMove = p.SideToMove.Invert()
 
@@ -427,6 +424,7 @@ func (p *Position) UndoMove(m Move) {
 }
 
 // KingInCheck returns true if the current side to move has their king in check.
+// TODO: actually make this work
 func (p *Position) KingInCheck() bool {
 	return false
 }
@@ -447,7 +445,7 @@ func (p *Position) IsValid(square uint8) bool {
 }
 
 // OnRank returns true if the specified square is on the given rank.
-// TODO: write better tests
+// TODO: write tests for seeing if a particular square is on a given rank or file
 func (p *Position) OnRank(square uint8, rank uint8) bool {
 	rank -= 1
 	return square >= 8*rank && square <= 8*rank+7
@@ -461,4 +459,30 @@ func (p *Position) OnFileA(square uint8) bool {
 // OnFileH returns true if the specified square is on the H-file.
 func (p *Position) OnFileH(square uint8) bool {
 	return square%8 == 7
+}
+
+// setSquare sets a specific square on the board to a empty or to a certain piece.
+// This updates the bitboards as well as modifying Squares.
+func (p *Position) setSquare(square uint8, newPiece ColoredPiece) {
+	oldPiece := p.Squares[square]
+
+	if oldPiece == newPiece {
+		return
+	}
+
+	p.Squares[square] = newPiece
+
+	if oldPiece != Empty {
+		p.Occupied[oldPiece.Color()].Off(square)
+		p.Pieces[oldPiece.Colorless()].Off(square)
+	}
+
+	if newPiece != Empty {
+		p.Occupied[newPiece.Color()].On(square)
+		p.Pieces[newPiece.Colorless()].On(square)
+	}
+
+	if newPiece == WhiteKing || newPiece == BlackKing {
+		p.KingLocation[newPiece.Color()] = square
+	}
 }

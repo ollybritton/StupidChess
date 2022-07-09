@@ -50,6 +50,9 @@ func (s *Session) Handle(commandLine string) error {
 	case "_pp", "_prettyprint":
 		handler = s.handleCommandPrettyPrint
 
+	case "_bb", "_bitboards":
+		handler = s.handleCommandBitboards
+
 	// Handle unknown commands
 	default:
 		fmt.Printf("info string don't understand %s\n", commandName)
@@ -283,6 +286,49 @@ func (s *Session) handleCommandPrettyPrint(arguments []string) error {
 	} else {
 		fmt.Println("")
 		fmt.Println(s.positions[len(s.positions)-1].PrettyPrint())
+		fmt.Println("")
+	}
+
+	return nil
+}
+
+func (s *Session) handleCommandBitboards(arguments []string) error {
+	if len(s.positions) == 0 {
+		fmt.Println("nothing to pretty print, no positions yet")
+	} else {
+		curr := s.positions[len(s.positions)-1]
+		fmt.Println("")
+
+		fmt.Println("WHITE occupation:")
+		fmt.Println(curr.Occupied[position.White].String())
+		fmt.Println("")
+
+		fmt.Println("BLACK occupation:")
+		fmt.Println(curr.Occupied[position.Black].String())
+		fmt.Println("")
+
+		fmt.Println("PAWNS:")
+		fmt.Println(curr.Pieces[position.Pawn].String())
+		fmt.Println("")
+
+		fmt.Println("KNIGHTS:")
+		fmt.Println(curr.Pieces[position.Knight].String())
+		fmt.Println("")
+
+		fmt.Println("BISHOPS:")
+		fmt.Println(curr.Pieces[position.Bishop].String())
+		fmt.Println("")
+
+		fmt.Println("ROOKS:")
+		fmt.Println(curr.Pieces[position.Rook].String())
+		fmt.Println("")
+
+		fmt.Println("QUEENS:")
+		fmt.Println(curr.Pieces[position.Queen].String())
+		fmt.Println("")
+
+		fmt.Println("KINGS:")
+		fmt.Println(curr.Pieces[position.King].String())
 		fmt.Println("")
 	}
 

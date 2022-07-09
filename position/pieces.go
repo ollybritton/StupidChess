@@ -59,6 +59,25 @@ func (c ColoredPiece) Color() Color {
 	return Color(c & 0b00000001)
 }
 
+func (c ColoredPiece) Colorless() Piece {
+	switch c {
+	case WhitePawn, BlackPawn:
+		return Pawn
+	case WhiteKnight, BlackKnight:
+		return Knight
+	case WhiteBishop, BlackBishop:
+		return Bishop
+	case WhiteRook, BlackRook:
+		return Rook
+	case WhiteQueen, BlackQueen:
+		return Queen
+	case WhiteKing, BlackKing:
+		return King
+	}
+
+	return None
+}
+
 func strToColored(str string) ColoredPiece {
 	return ColoredPiece(strings.IndexAny("PpNnBbRrQqKk?", str))
 }
