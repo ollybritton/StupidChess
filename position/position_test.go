@@ -197,3 +197,5 @@ func TestValidMoves(t *testing.T) {
 		assert.Equal(t, test.expectedFEN, position.StringFEN(), "expected FEN to match after moves have been played")
 	}
 }
+
+// TODO: write tests for generating moves and then unmaking them

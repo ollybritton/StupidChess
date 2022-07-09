@@ -436,7 +436,7 @@ func (p *Position) UndoMove(m Move) {
 			p.setSquare(m.To, Empty)
 
 			switch int(m.To) - int(m.From) {
-			case 7, 9:
+			case 7, 9: // I think this code disagrees with the source of GoBit, if there's a bug related to undoing moves it might be here.
 				p.setSquare(m.To-8, BlackPawn)
 			case -7, -9:
 				p.setSquare(m.To+8, WhitePawn)

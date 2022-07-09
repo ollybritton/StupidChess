@@ -29,6 +29,23 @@ func (p *Position) MovesPseudolegal() []Move {
 	return legalMoves
 }
 
+// Knight moves and king moves can be found by looking up a table of each square on the board to the corresponding bitboard.
+// This table is initialised at the beginning of the program.
+//
+// It would be nice to have a table to look up bishop and rook attacks (and queens, which are their combination), but this would require a table with
+// around 64*2^64 entries, for each square on the board and all possible other pieces on the board that could block its path.
+// The solution to this is to use magic bitboards, which is where you find all the "blockers" in the way of a rook or bishop's path, and multiply
+// it by a magic number that turns this into the index of a pre-populated table. This reduces the amount of information you need to store.
+// This pre-populated table should be generated and stored at the start of the program.
+// I still don't understand this very well -- you can probably tell from the half-description. Hopefully writing the implementation will mean I understand
+// it better.
+//
+// Moves for pawns should be generated seperately for black and white, and then have the MovesPseudolegal function pick the correct
+// ones depending on whose side to move it is. This is because pawn moves aren't symmetrical like the other moves.
+// There's a way you can do this effeciently with bitwise operations.
+//
+// TODO: Write a function for generating a list of moves given a from square and a bitboard of all possible destinations.
+
 func (p *Position) MovesFromSquare(i uint8) []Move {
 	moves := []Move{}
 
