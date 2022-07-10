@@ -3,6 +3,7 @@ package position
 import (
 	"bytes"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"unicode/utf8"
 )
@@ -19,6 +20,12 @@ func (b *Bitboard) Off(pos uint8) {
 	*b &= Bitboard(^(uint64(1) << pos))
 }
 
+// IsOn returns true if that specific bit is on.
+func (b *Bitboard) IsOn(pos uint8) bool {
+	val := uint64(*b) & (1 << uint64(pos))
+	return val > 0
+}
+
 // String returns a nice string representation of the bitboard.
 func (b *Bitboard) String() string {
 	var out bytes.Buffer
@@ -33,6 +40,24 @@ func (b *Bitboard) String() string {
 	}
 
 	return out.String()
+}
+
+// FirstOn returns the index (starting from the least significant bit) of the first bit that is on in the bitboard.
+//
+func (b *Bitboard) FirstOn() uint8 {
+	return uint8(bits.TrailingZeros64(uint64(*b)))
+}
+
+// LastOn returns the index (starting from the least significant bit) of the last bit that is on in the bitboard.
+// Equals 64 when there are no 1s.
+func (b *Bitboard) LastOn() uint8 {
+	result := 63 - bits.LeadingZeros64(uint64(*b))
+
+	if result == -1 {
+		return uint8(64)
+	} else {
+		return uint8(result)
+	}
 }
 
 func reverse(s string) string {

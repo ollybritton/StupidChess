@@ -1,5 +1,17 @@
 package position
 
+const (
+	DirN = +8
+	DirE = +1
+	DirS = -8
+	DirW = -1
+
+	DirNE = +9
+	DirNW = +7
+	DirSE = -9
+	DirSW = -7
+)
+
 func (p *Position) MovesLegal() []Move {
 	pseudolegalMoves := p.MovesPseudolegal()
 	legalMoves := []Move{}
@@ -14,19 +26,127 @@ func (p *Position) MovesLegal() []Move {
 }
 
 func (p *Position) MovesPseudolegal() []Move {
-	legalMoves := []Move{}
+	pseudolegalMoves := []Move{}
 
-	for i := uint8(0); i < 64; i++ {
-		// Skip a square if it's empty or not the correct color.
-		if p.Squares[i] == Empty || p.Squares[i].Color() != p.SideToMove {
-			continue
-		}
-
-		movesFromSquare := p.MovesFromSquare(i)
-		legalMoves = append(legalMoves, movesFromSquare...)
+	if p.SideToMove == White {
+		pseudolegalMoves = append(pseudolegalMoves, p.MovesWhitePawns()...)
+	} else if p.SideToMove == Black {
+		pseudolegalMoves = append(pseudolegalMoves, p.MovesBlackPawns()...)
 	}
 
-	return legalMoves
+	return pseudolegalMoves
+}
+
+func (p *Position) MovesWhitePawns() []Move {
+	moves := []Move{}
+	whitePawns := p.Pieces[Pawn] & p.Occupied[White]
+
+	oneStep := (whitePawns << DirN) & ^(p.Occupied[White] | p.Occupied[Black])
+	twoSteps := (whitePawns << (DirN * 2)) & ^(p.Occupied[White] | p.Occupied[Black]) & maskRank3
+
+	capturesLeft := (whitePawns & ^maskFileA) << DirNW & p.Occupied[Black]
+	capturesRight := (whitePawns & ^maskFileH) << DirNE & p.Occupied[Black]
+
+	promotions := (oneStep | capturesLeft | capturesRight) & maskRank8
+	if promotions != 0 {
+		for to := promotions.FirstOn(); to <= promotions.LastOn() && to != 64; to++ {
+			if promotions.IsOn(to) {
+				if capturesLeft.IsOn(to) {
+					from := to - DirNW
+
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Queen, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Bishop, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Knight, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Rook, p.Castling, p.EnPassant))
+				}
+
+				if capturesRight.IsOn(to) {
+					from := to - DirNE
+
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Queen, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Bishop, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Knight, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Rook, p.Castling, p.EnPassant))
+				}
+
+				if oneStep.IsOn(to) {
+					from := to - DirN
+
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Queen, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Bishop, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Knight, p.Castling, p.EnPassant))
+					moves = append(moves, NewMove(from, to, WhitePawn, p.Squares[to], Rook, p.Castling, p.EnPassant))
+				}
+			}
+		}
+	}
+
+	var enPassantLeft, enPassantRight Bitboard
+
+	if p.EnPassant != 0 {
+		enPassant := Bitboard(1) << uint(p.EnPassant)
+
+		enPassantLeft = ((whitePawns & ^maskFileA) << DirNW) & enPassant
+		enPassantRight = ((whitePawns & ^maskFileH) << DirNE) & enPassant
+
+		if enPassantLeft != 0 {
+			from := p.EnPassant - DirNW
+			moves = append(moves, NewMove(from, p.EnPassant, WhitePawn, BlackPawn, None, p.Castling, p.EnPassant))
+		}
+
+		if enPassantRight != 0 {
+			from := p.EnPassant - DirNE
+			moves = append(moves, NewMove(from, p.EnPassant, WhitePawn, BlackPawn, None, p.Castling, p.EnPassant))
+		}
+	}
+
+	for to := oneStep.FirstOn(); to <= oneStep.LastOn() && to != 64; to++ {
+		if oneStep.IsOn(to) {
+			from := to - DirN
+			moves = append(moves, NewMove(from, to, WhitePawn, Empty, None, p.Castling, p.EnPassant))
+		}
+	}
+
+	for to := twoSteps.FirstOn(); to <= twoSteps.LastOn() && to != 64; to++ {
+		if twoSteps.IsOn(to) {
+			from := to - DirN - DirN
+			moves = append(moves, NewMove(from, to, WhitePawn, Empty, None, p.Castling, p.EnPassant))
+		}
+	}
+
+	for to := capturesLeft.FirstOn(); to <= capturesLeft.LastOn() && to != 64; to++ {
+		if capturesLeft.IsOn(to) {
+			from := to - DirNW
+			moves = append(moves, NewMove(from, to, WhitePawn, Empty, None, p.Castling, p.EnPassant))
+		}
+	}
+
+	for to := capturesRight.FirstOn(); to <= capturesRight.LastOn() && to != 64; to++ {
+		if capturesRight.IsOn(to) {
+			from := to - DirNE
+			moves = append(moves, NewMove(from, to, WhitePawn, Empty, None, p.Castling, p.EnPassant))
+		}
+	}
+
+	return moves
+}
+
+func (p *Position) MovesBlackPawns() []Move {
+	return []Move{}
+}
+
+// movesFromBitboard returns a list of moves given a piece, a from square and a bitboard representing all possible destinations.
+// This function doesn't know anything about promotions.
+func (p *Position) movesFromBitboard(piece ColoredPiece, from uint8, bitboard Bitboard) []Move {
+	moves := []Move{}
+
+	for to := bitboard.FirstOn(); to <= bitboard.LastOn() && to != 64; to++ {
+		if bitboard.IsOn(to) {
+			moves = append(moves, NewMove(from, to, piece, p.Squares[to], None, p.Castling, p.EnPassant))
+		}
+	}
+
+	return moves
 }
 
 // Knight moves and king moves can be found by looking up a table of each square on the board to the corresponding bitboard.
@@ -45,85 +165,3 @@ func (p *Position) MovesPseudolegal() []Move {
 // There's a way you can do this effeciently with bitwise operations.
 //
 // TODO: Write a function for generating a list of moves given a from square and a bitboard of all possible destinations.
-
-func (p *Position) MovesFromSquare(i uint8) []Move {
-	moves := []Move{}
-
-	switch p.Squares[i] {
-	case WhitePawn:
-		moves = append(moves, p.MovesWhitePawnPushes(i)...)
-		moves = append(moves, p.MovesWhitePawnCaptures(i)...)
-	case BlackPawn:
-		moves = append(moves, p.MovesBlackPawnPushes(i)...)
-		moves = append(moves, p.MovesBlackPawnCaptures(i)...)
-	}
-
-	return moves
-}
-
-func (p *Position) MovesWhitePawnPushes(i uint8) []Move {
-	moves := []Move{}
-
-	// The pawn is on the 2nd rank and so it can move two squares.
-	if p.OnRank(i, 2) && p.IsEmpty(i+16) {
-		moves = append(moves, NewMove(i, i+16, None))
-	}
-
-	if p.IsEmpty(i + 8) {
-		moves = append(moves, NewMove(i, i+8, None))
-	}
-
-	return moves
-}
-
-func (p *Position) MovesWhitePawnCaptures(i uint8) []Move {
-	moves := []Move{}
-
-	// Capturing upwards to the left.
-	if !p.OnFileA(i) && p.IsValid(i+7) && !p.IsEmpty(i+7) && p.Squares[i+7].Color() == p.SideToMove.Invert() {
-		moves = append(moves, NewMove(i, i+7, None))
-	}
-
-	// Capturing upwards to the right.
-	if !p.OnFileH(i) && p.IsValid(i+9) && !p.IsEmpty(i+9) && p.Squares[i+9].Color() == p.SideToMove.Invert() {
-		moves = append(moves, NewMove(i, i+9, None))
-	}
-
-	// TODO: promotion properly
-	// TODO: en passant logic
-
-	return moves
-}
-
-func (p *Position) MovesBlackPawnPushes(i uint8) []Move {
-	moves := []Move{}
-
-	// The pawn is on the 7th rank and so it can move two squares.
-	if p.OnRank(i, 7) && p.IsEmpty(i-16) {
-		moves = append(moves, NewMove(i, i-16, None))
-	}
-
-	if p.IsEmpty(i - 8) {
-		moves = append(moves, NewMove(i, i-8, None))
-	}
-
-	return moves
-}
-
-func (p *Position) MovesBlackPawnCaptures(i uint8) []Move {
-	moves := []Move{}
-
-	// Capturing downwards to the left.
-	if !p.OnFileA(i) && p.IsValid(i-7) && !p.IsEmpty(i-7) && p.Squares[i-7].Color() == p.SideToMove.Invert() {
-		moves = append(moves, NewMove(i, i-7, None))
-	}
-
-	// Capturing downwards to the right.
-	if !p.OnFileH(i) && p.IsValid(i-9) && !p.IsEmpty(i-9) && p.Squares[i-9].Color() == p.SideToMove.Invert() {
-		moves = append(moves, NewMove(i, i-9, None))
-	}
-
-	// TODO: en passant logic
-
-	return moves
-}

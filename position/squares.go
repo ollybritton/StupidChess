@@ -19,6 +19,22 @@ func StringToSquare(str string) uint8 {
 }
 
 const (
+	maskRank1 = Bitboard(0x00000000000000FF)
+	maskRank2 = Bitboard(0x000000000000FF00)
+	maskRank3 = Bitboard(0x0000000000FF0000)
+	maskRank4 = Bitboard(0x00000000FF000000)
+	maskRank5 = Bitboard(0x000000FF00000000)
+	maskRank6 = Bitboard(0x0000FF0000000000)
+	maskRank7 = Bitboard(0x00FF000000000000)
+	maskRank8 = Bitboard(0xFF00000000000000)
+	maskFileA = Bitboard(0x0101010101010101)
+	maskFileB = Bitboard(0x0202020202020202)
+	maskFileG = Bitboard(0x4040404040404040)
+	maskFileH = Bitboard(0x8080808080808080)
+)
+
+// Square names as variables in the program.
+const (
 	SquareA1 uint8 = iota
 	SquareB1
 	SquareC1

@@ -9,19 +9,24 @@ type Move struct {
 	To   uint8
 
 	Moved     ColoredPiece
-	Promotion Piece
 	Captured  ColoredPiece
+	Promotion Piece
 
 	PriorCastling        CastlingAvailability
 	PriorEnPassantTarget uint8
 }
 
 // NewMove returns a new move from a from square to a to square.
-func NewMove(from, to uint8, promotion Piece) Move {
+func NewMove(from, to uint8, moved, captured ColoredPiece, promotion Piece, priorCastling CastlingAvailability, priorEnPassant uint8) Move {
 	return Move{
 		From:      from,
 		To:        to,
+		Moved:     moved,
+		Captured:  captured,
 		Promotion: promotion,
+
+		PriorCastling:        priorCastling,
+		PriorEnPassantTarget: priorEnPassant,
 	}
 }
 
