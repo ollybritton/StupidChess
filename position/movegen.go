@@ -284,7 +284,7 @@ func (p *Position) MovesBlackPawns() []Move {
 }
 
 func (p *Position) MovesKing() []Move {
-	bitboard := kingMoves[p.KingLocation[p.SideToMove]] & ^p.Occupied[p.SideToMove.Invert()]
+	bitboard := kingMoves[p.KingLocation[p.SideToMove]] & ^p.Occupied[p.SideToMove]
 
 	return p.movesFromBitboard(
 		King.OfColor(p.SideToMove),
