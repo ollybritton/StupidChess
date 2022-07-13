@@ -33,6 +33,7 @@ func TestValidFENInvariant(t *testing.T) {
 		"K1k5/8/P7/8/8/8/8/8 w - - 0 1",
 		"8/k1P5/8/1K6/8/8/8/8 w - - 0 1",
 		"8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1",
+		"rnbqkb1r/pp2pppp/5n2/2pp4/3P1B2/3BP3/PPP2PPP/RN1QK1NR b KQkq - 1 4",
 	}
 
 	for _, test := range tests {

@@ -289,7 +289,7 @@ func (p *Position) PrettyPrint() string {
 	for i := 7; i >= 0; i-- {
 		rank := ranks[i]
 		out.WriteString("  ")
-		out.WriteString(fmt.Sprint(i))
+		out.WriteString(fmt.Sprint(i + 1))
 		out.WriteString("  ")
 		out.WriteString(rank)
 		out.WriteString("\n     ")

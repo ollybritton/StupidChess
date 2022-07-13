@@ -45,6 +45,8 @@ func (s *Session) Handle(commandLine string) error {
 		handler = s.handleCommandPosition
 	case "go":
 		handler = s.handleCommandGo
+	case "ucinewgame":
+		handler = s.handleCommandNewGame
 
 	// Special debugging commands not in the UCI protocol
 	case "_pp", "_prettyprint":
@@ -52,6 +54,12 @@ func (s *Session) Handle(commandLine string) error {
 
 	case "_bb", "_bitboards":
 		handler = s.handleCommandBitboards
+
+	case "_pmv", "_pseudolegal":
+		handler = s.handleCommandPseudolegalMoves
+
+	case "_mm", "_makemove":
+		handler = s.handleCommandMakeMove
 
 	// Handle unknown commands
 	default:
@@ -84,7 +92,7 @@ func (s *Session) handleCommandIsReady(arguments []string) error {
 
 // handleCommandPosition is called when the GUI gives the "position" command.
 // The position command in the UCI protocol has the following format:
-//   position <fen string>|startpos moves <long algebraic notation moves>
+//   position fen <fen string>|startpos moves <long algebraic notation moves>
 // Long algebraic notation moves look like so:
 //   e2e4, e7e5, e1g1 (white short castling), e7e8q (for promotion)
 func (s *Session) handleCommandPosition(arguments []string) error {
@@ -109,9 +117,10 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 		movesIndex := strings.Index(all, "moves")
 
 		if movesIndex == -1 {
-			fen = all
+			fen = strings.TrimPrefix(all, "fen ")
 		} else {
 			fen = all[:movesIndex-1] // Index of 'm', need end position of FEN string.
+			fen = strings.TrimPrefix(fen, "fen ")
 			moves = strings.Fields(all[movesIndex+6:])
 		}
 
@@ -276,6 +285,11 @@ func (s *Session) handleCommandGo(arguments []string) error {
 	return nil
 }
 
+func (s *Session) handleCommandNewGame(arguments []string) error {
+	// TODO: implement special logic around ucinewgame command
+	return nil
+}
+
 func (s *Session) handleCommandUnknown(arguments []string) error {
 	return nil
 }
@@ -330,6 +344,39 @@ func (s *Session) handleCommandBitboards(arguments []string) error {
 		fmt.Println("KINGS:")
 		fmt.Println(curr.Pieces[position.King].String())
 		fmt.Println("")
+	}
+
+	return nil
+}
+
+func (s *Session) handleCommandPseudolegalMoves(arguments []string) error {
+	length := len(s.positions)
+
+	if length == 0 {
+		return fmt.Errorf("no positions to analyse")
+	}
+
+	for _, move := range s.positions[length-1].MovesPseudolegal() {
+		fmt.Println(move)
+	}
+
+	return nil
+}
+
+func (s *Session) handleCommandMakeMove(arguments []string) error {
+	length := len(s.positions)
+
+	if length == 0 {
+		return fmt.Errorf("no positions to make move on")
+	}
+
+	for _, moveStr := range arguments {
+		move, err := position.ParseMove(moveStr)
+		if err != nil {
+			return err
+		}
+
+		s.positions[length-1].MakeMove(move)
 	}
 
 	return nil

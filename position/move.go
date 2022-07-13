@@ -1,6 +1,9 @@
 package position
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Move represents a chess move.
 // TODO: switch to a more compact binary format.
@@ -60,5 +63,9 @@ func ParseMove(str string) (Move, error) {
 
 // String returns the long algebraic notation representation of the move.
 func (m Move) String() string {
-	return SquareToString(m.From) + SquareToString(m.To)
+	if m.Promotion == None {
+		return SquareToString(m.From) + SquareToString(m.To)
+	} else {
+		return SquareToString(m.From) + SquareToString(m.To) + strings.ToLower(m.Promotion.String())
+	}
 }
