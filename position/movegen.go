@@ -41,6 +41,7 @@ func (p *Position) MovesPseudolegal() []Move {
 	}
 
 	pseudolegalMoves = append(pseudolegalMoves, p.MovesKing()...)
+	pseudolegalMoves = append(pseudolegalMoves, p.MovesKnights()...)
 
 	return pseudolegalMoves
 }
@@ -293,6 +294,29 @@ func (p *Position) MovesKing() []Move {
 	)
 }
 
+func (p *Position) MovesKnights() []Move {
+	knightLocations := p.Pieces[Knight] & p.Occupied[p.SideToMove]
+	moves := []Move{}
+
+	for from := knightLocations.FirstOn(); from < 64 && from <= knightLocations.LastOn(); from++ {
+		if knightLocations.IsOn(from) {
+			bitboard := knightMoves[from] & ^p.Occupied[p.SideToMove]
+			moves = append(
+				moves,
+				p.movesFromBitboard(
+					Knight.OfColor(p.SideToMove),
+					func(to uint8) uint8 {
+						return from
+					},
+					bitboard,
+				)...,
+			)
+		}
+	}
+
+	return moves
+}
+
 // movesFromBitboard returns a list of moves given a piece, a from square and a bitboard representing all possible destinations.
 // fromFunc takes a function to calculate the from square from the to square. E.g. if it's a white pawn advance of one square, the function
 // that needs to be passed will subtract 8.
@@ -402,5 +426,97 @@ func initialiseKingMoves() [64]Bitboard {
 // initialiseKnightMoves is executed at the start of the program and sets up a table of all the possible knight moves from any of the 64 squares,
 // assuming that the other squares are not occupied.
 func initialiseKnightMoves() [64]Bitboard {
-	return [64]Bitboard{}
+	moves := [64]Bitboard{}
+
+	// Possible knight moves from a given square:
+	// . * . * .
+	// * . . . *
+	// . . N . .
+	// * . . . *
+	// . * . * .
+	// Care needs to be taken not to set bits out of the range.
+
+	for from := uint8(0); from < 64; from++ {
+		bitboard := Bitboard(0)
+
+		rank := (from / 8) + 1
+		file := (from % 8) + 1 // A-file is 1, B-file is 2, etc.
+
+		if file > 2 && rank < 8 {
+			// . . . . .
+			// * . . . .
+			// . . N . .
+			// . . . . .
+			// . . . . .
+			bitboard.On(from + 8 - 1 - 1)
+		}
+
+		if file < 7 && rank < 8 {
+			// . . . . .
+			// . . . . *
+			// . . N . .
+			// . . . . .
+			// . . . . .
+			bitboard.On(from + 8 + 1 + 1)
+		}
+
+		if file > 1 && rank < 7 {
+			// . * . . .
+			// . . . . .
+			// . . N . .
+			// . . . . .
+			// . . . . .
+			bitboard.On(from + 8 + 8 - 1)
+		}
+
+		if file < 8 && rank < 7 {
+			// . . . * .
+			// . . . . .
+			// . . N . .
+			// . . . . .
+			// . . . . .
+			bitboard.On(from + 8 + 8 + 1)
+		}
+
+		if file > 2 && rank > 1 {
+			// . . . . .
+			// . . . . .
+			// . . N . .
+			// * . . . .
+			// . . . . .
+			bitboard.On(from - 8 - 1 - 1)
+		}
+
+		if file < 7 && rank > 1 {
+			// . . . . .
+			// . . . . .
+			// . . N . .
+			// . . . . *
+			// . . . . .
+			bitboard.On(from - 8 + 1 + 1)
+		}
+
+		if file > 1 && rank > 2 {
+			// . . . . .
+			// . . . . .
+			// . . N . .
+			// . . . . .
+			// . * . . .
+			bitboard.On(from - 8 - 8 - 1)
+		}
+
+		if file < 8 && rank > 2 {
+			// . . . . .
+			// . . . . .
+			// . . N . .
+			// . . . . .
+			// . . . * .
+			bitboard.On(from - 8 - 8 + 1)
+		}
+
+		moves[from] = bitboard
+
+	}
+
+	return moves
 }
