@@ -1,5 +1,7 @@
 package position
 
+import "fmt"
+
 const (
 	DirN = +8
 	DirE = +1
@@ -16,6 +18,10 @@ var (
 	// Pre-initialised tables of king and knight moves
 	kingMoves   [64]Bitboard = initialiseKingMoves()
 	knightMoves [64]Bitboard = initialiseKnightMoves()
+
+	// Pre-initialised tables of rook and bishop masks to find the blockers on the board from a particular square
+	rookMasks   [64]Bitboard = initialiseRookMasks()
+	bishopMasks [64]Bitboard = initialiseBishopMasks()
 )
 
 func (p *Position) MovesLegal() []Move {
@@ -519,4 +525,38 @@ func initialiseKnightMoves() [64]Bitboard {
 	}
 
 	return moves
+}
+
+func initialiseRookMasks() [64]Bitboard {
+	moves := [64]Bitboard{}
+
+	for from := uint8(0); from < 64; from++ {
+		bitboard := Bitboard(from)
+
+		rank := (from / 8) + 1
+		file := (from % 8) + 1
+
+		bottomLimit := file - 1
+		topLimit := 7*8 + (file - 1)
+
+		leftLimit := (rank - 1) * 8
+		rightLimit := leftLimit + 8
+
+		for i := bottomLimit; i < topLimit; i += 8 {
+			bitboard.On(i)
+		}
+
+		for i := leftLimit; i < rightLimit; i++ {
+			bitboard.On(i)
+		}
+
+		moves[from] = bitboard
+	}
+
+	fmt.Println(moves[SquareB4].String())
+	return moves
+}
+
+func initialiseBishopMasks() [64]Bitboard {
+	return [64]Bitboard{}
 }
