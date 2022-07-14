@@ -31,6 +31,8 @@ const (
 	maskFileB = Bitboard(0x0202020202020202)
 	maskFileG = Bitboard(0x4040404040404040)
 	maskFileH = Bitboard(0x8080808080808080)
+
+	maskNonPerimiterSquares = Bitboard(0b00000000_01111110_01111110_01111110_01111110_01111110_01111110_00000000)
 )
 
 // Square names as variables in the program.

@@ -1,7 +1,5 @@
 package position
 
-import "fmt"
-
 const (
 	DirN = +8
 	DirE = +1
@@ -531,32 +529,93 @@ func initialiseRookMasks() [64]Bitboard {
 	moves := [64]Bitboard{}
 
 	for from := uint8(0); from < 64; from++ {
-		bitboard := Bitboard(from)
+		bitboard := Bitboard(0)
 
 		rank := (from / 8) + 1
 		file := (from % 8) + 1
 
-		bottomLimit := file - 1
-		topLimit := 7*8 + (file - 1)
+		limitBottom := file - 1
+		limitTop := 7*8 + (file - 1)
 
-		leftLimit := (rank - 1) * 8
-		rightLimit := leftLimit + 8
+		limitLeft := (rank - 1) * 8
+		limitRight := limitLeft + 7
 
-		for i := bottomLimit; i < topLimit; i += 8 {
+		for i := limitBottom; i <= limitTop; i += 8 {
 			bitboard.On(i)
 		}
 
-		for i := leftLimit; i < rightLimit; i++ {
+		for i := limitLeft; i <= limitRight; i++ {
 			bitboard.On(i)
 		}
+
+		// This may not be the most efficient way to do this, but since this only runs once at the start of the
+		// program it is fine for now.
+		// TODO: clean up rook mask generation code
+		bitboard.Off(limitBottom)
+		bitboard.Off(limitTop)
+		bitboard.Off(limitRight)
+		bitboard.Off(limitLeft)
+		bitboard.Off(from)
 
 		moves[from] = bitboard
 	}
 
-	fmt.Println(moves[SquareB4].String())
 	return moves
 }
 
 func initialiseBishopMasks() [64]Bitboard {
-	return [64]Bitboard{}
+	moves := [64]Bitboard{}
+
+	// TODO: clean up and comment this code. Efficiency isn't important here as this is only initialising table values
+	// but it's not the easiest to understand like this
+	for from := uint8(0); from < 64; from++ {
+		bitboard := Bitboard(0)
+		rank := (from / 8) + 1
+		file := (from % 8) + 1
+
+		_, _ = rank, file
+
+		for i := from; i < 64; i += 9 {
+			if i%8 <= from%8 && i != from {
+				break
+			}
+
+			bitboard.On(i)
+		}
+
+		for i := from; i >= 0; i -= 9 {
+			if i%8 >= from%8 && i != from {
+				break
+			}
+
+			bitboard.On(i)
+
+			if i < 9 {
+				break
+			}
+		}
+
+		for i := from; i < 64; i += 7 {
+			if i%8 >= from%8 && i != from {
+				break
+			}
+
+			bitboard.On(i)
+		}
+
+		for i := from; i >= 0 && i < 64; i -= 7 {
+			if i%8 <= from%8 && i != from {
+				break
+			}
+
+			bitboard.On(i)
+		}
+
+		bitboard.Off(from)
+		bitboard &= maskNonPerimiterSquares
+
+		moves[from] = bitboard
+	}
+
+	return moves
 }
