@@ -1,5 +1,7 @@
 package position
 
+import "fmt"
+
 const (
 	DirN = +8
 	DirE = +1
@@ -14,12 +16,16 @@ const (
 
 var (
 	// Pre-initialised tables of king and knight moves
-	kingMoves   [64]Bitboard = initialiseKingMoves()
-	knightMoves [64]Bitboard = initialiseKnightMoves()
+	kingMoves   [64]Bitboard
+	knightMoves [64]Bitboard
 
 	// Pre-initialised tables of rook and bishop masks to find the blockers on the board from a particular square
-	rookMasks   [64]Bitboard = initialiseRookMasks()
-	bishopMasks [64]Bitboard = initialiseBishopMasks()
+	rookMasks   [64]Bitboard
+	bishopMasks [64]Bitboard
+
+	// Pre-initialised tables of rook and bishop moves from a square given an index calculated using a magic number.
+	rookMoves   [64][4096]Bitboard
+	bishopMoves [64][512]Bitboard
 )
 
 func (p *Position) MovesLegal() []Move {
@@ -46,6 +52,9 @@ func (p *Position) MovesPseudolegal() []Move {
 
 	pseudolegalMoves = append(pseudolegalMoves, p.MovesKing()...)
 	pseudolegalMoves = append(pseudolegalMoves, p.MovesKnights()...)
+
+	pseudolegalMoves = append(pseudolegalMoves, p.MovesRooks()...)
+	pseudolegalMoves = append(pseudolegalMoves, p.MovesBishops()...)
 
 	return pseudolegalMoves
 }
@@ -321,6 +330,66 @@ func (p *Position) MovesKnights() []Move {
 	return moves
 }
 
+func (p *Position) MovesRooks() []Move {
+	moves := []Move{}
+	rookLocations := p.Pieces[Rook] & p.Occupied[p.SideToMove]
+
+	for from := rookLocations.FirstOn(); from < 64 && from <= rookLocations.LastOn(); from++ {
+		if rookLocations.IsOn(from) {
+			blockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & rookMasks[from]
+			key := (uint64(blockers) * rookMagics[from].multiplier) >> rookMagics[from].shift
+
+			moves = append(
+				moves,
+				p.movesFromBitboard(
+					Rook.OfColor(p.SideToMove),
+					func(to uint8) uint8 {
+						return from
+					},
+					rookMoves[from][key] & ^p.Occupied[p.SideToMove],
+				)...,
+			)
+		}
+	}
+
+	return moves
+}
+
+func (p *Position) MovesBishops() []Move {
+	moves := []Move{}
+	bishopLocations := p.Pieces[Bishop] & p.Occupied[p.SideToMove]
+
+	for from := bishopLocations.FirstOn(); from < 64 && from <= bishopLocations.LastOn(); from++ {
+		if bishopLocations.IsOn(from) {
+			blockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & bishopMasks[from]
+			key := (uint64(blockers) * bishopMagics[from].multiplier) >> bishopMagics[from].shift
+
+			available := bishopMoves[from][key] & ^p.Occupied[p.SideToMove]
+
+			fmt.Println("bishop blockers, marking location of bishops:")
+			fmt.Println(blockers.StringWithMark(from))
+			fmt.Println("")
+			fmt.Println("calculated available moves, marking location of bishops:")
+			fmt.Println(available.StringWithMark(from))
+			fmt.Println("")
+			fmt.Println("")
+
+			moves = append(
+				moves,
+				p.movesFromBitboard(
+					Rook.OfColor(p.SideToMove),
+					func(to uint8) uint8 {
+						return from
+					},
+					available,
+				)...,
+			)
+		}
+	}
+
+	return moves
+}
+
 // movesFromBitboard returns a list of moves given a piece, a from square and a bitboard representing all possible destinations.
 // fromFunc takes a function to calculate the from square from the to square. E.g. if it's a white pawn advance of one square, the function
 // that needs to be passed will subtract 8.
@@ -525,6 +594,8 @@ func initialiseKnightMoves() [64]Bitboard {
 	return moves
 }
 
+// initiailiseRookMasks pre-populates the table of rook masks representing the possible squares a rook can travel to on an empty board
+// from a given square
 func initialiseRookMasks() [64]Bitboard {
 	moves := [64]Bitboard{}
 
@@ -563,6 +634,85 @@ func initialiseRookMasks() [64]Bitboard {
 	return moves
 }
 
+// getRookMovesFromOccupation returns the rook moves available from a given square with a bitboard representing the occupied squares
+// in its path.
+// TODO: clean up this code and make it more efficient
+func getRookMovesFromOccupation(from uint8, occupiedSquares Bitboard) Bitboard {
+	bitboard := Bitboard(0)
+
+	rank := (from / 8) + 1
+	file := (from % 8) + 1
+
+	limitBottom := file - 1
+	limitTop := 7*8 + (file - 1)
+
+	limitLeft := (rank - 1) * 8
+	limitRight := limitLeft + 7
+
+	for i := from; i <= limitTop; i += 8 {
+		bitboard.On(i)
+
+		if occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	for i := from; i >= limitBottom && i >= 8; i -= 8 {
+		bitboard.On(i)
+
+		if occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	for i := from; i <= limitRight; i++ {
+		bitboard.On(i)
+
+		if occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	for i := from; i >= limitLeft && i >= 1; i-- {
+		bitboard.On(i)
+
+		if occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	bitboard.Off(from)
+
+	return bitboard
+}
+
+func initialiseRookMoves() [64][4096]Bitboard {
+	moves := [64][4096]Bitboard{}
+
+	for from := uint8(0); from < 64; from++ {
+		subset := Bitboard(0)
+		i := 0
+
+		// This code comes from
+		//   https://github.com/nkarve/surge/blob/c4ea4e2655cc938632011672ddc880fefe7d02a6/src/tables.cpp#L148
+		// Which was found on the question
+		//   https://chess.stackexchange.com/questions/34453/how-do-i-complete-this-implementation-of-magic-bitboards
+		// This sort of reverse-engineers the magic numbers to come up with all possible blocker bits so we can initialise the table more
+		// quickly.
+		for subset != 0 || i == 0 {
+			index := subset
+			index = index * Bitboard(rookMagics[from].multiplier)
+			index = index >> rookMagics[from].shift
+			moves[from][index] = getRookMovesFromOccupation(from, subset)
+
+			subset = (subset - rookMasks[from]) & rookMasks[from]
+			i++
+		}
+	}
+
+	return moves
+}
+
 func initialiseBishopMasks() [64]Bitboard {
 	moves := [64]Bitboard{}
 
@@ -570,10 +720,6 @@ func initialiseBishopMasks() [64]Bitboard {
 	// but it's not the easiest to understand like this
 	for from := uint8(0); from < 64; from++ {
 		bitboard := Bitboard(0)
-		rank := (from / 8) + 1
-		file := (from % 8) + 1
-
-		_, _ = rank, file
 
 		for i := from; i < 64; i += 9 {
 			if i%8 <= from%8 && i != from {
@@ -609,6 +755,10 @@ func initialiseBishopMasks() [64]Bitboard {
 			}
 
 			bitboard.On(i)
+
+			if i < 7 {
+				break
+			}
 		}
 
 		bitboard.Off(from)
@@ -618,4 +768,101 @@ func initialiseBishopMasks() [64]Bitboard {
 	}
 
 	return moves
+}
+
+func getBishopMovesFromOccupation(from uint8, occupiedSquares Bitboard) Bitboard {
+	bitboard := Bitboard(0)
+
+	for i := from; i < 64; i += 9 {
+		if i%8 <= from%8 && i != from {
+			break
+		}
+
+		bitboard.On(i)
+
+		if occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	for i := from; i >= 0; i -= 9 {
+		if i%8 >= from%8 && i != from {
+			break
+		}
+
+		bitboard.On(i)
+
+		if i < 9 || occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	for i := from; i < 64; i += 7 {
+		if i%8 >= from%8 && i != from {
+			break
+		}
+
+		bitboard.On(i)
+
+		if occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	for i := from; i >= 0 && i < 64; i -= 7 {
+		if i%8 <= from%8 && i != from {
+			break
+		}
+
+		bitboard.On(i)
+
+		if i < 7 || occupiedSquares.IsOn(i) {
+			break
+		}
+	}
+
+	bitboard.Off(from)
+
+	return bitboard
+}
+
+func initialiseBishopMoves() [64][512]Bitboard {
+	moves := [64][512]Bitboard{}
+
+	for from := uint8(0); from < 64; from++ {
+		subset := Bitboard(0)
+		i := 0
+
+		// This code comes from
+		//   https://github.com/nkarve/surge/blob/c4ea4e2655cc938632011672ddc880fefe7d02a6/src/tables.cpp#L148
+		// Which was found on the question
+		//   https://chess.stackexchange.com/questions/34453/how-do-i-complete-this-implementation-of-magic-bitboards
+		// This sort of reverse-engineers the magic numbers to come up with all possible blocker bits so we can initialise the table more
+		// quickly.
+		for subset != 0 || i == 0 {
+			index := subset
+			index = index * Bitboard(bishopMagics[from].multiplier)
+			index = index >> bishopMagics[from].shift
+			moves[from][index] = getBishopMovesFromOccupation(from, subset)
+
+			subset = (subset - bishopMasks[from]) & bishopMasks[from]
+			i++
+		}
+	}
+
+	return moves
+}
+
+func init() {
+	// Pre-initialised tables of king and knight moves
+	kingMoves = initialiseKingMoves()
+	knightMoves = initialiseKnightMoves()
+
+	// Pre-initialised tables of rook and bishop masks to find the blockers on the board from a particular square
+	rookMasks = initialiseRookMasks()
+	bishopMasks = initialiseBishopMasks()
+
+	// Pre-initialised tables of rook and bishop moves from a square given an index calculated using a magic number.
+	rookMoves = initialiseRookMoves()
+	bishopMoves = initialiseBishopMoves()
 }

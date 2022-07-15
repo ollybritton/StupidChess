@@ -42,6 +42,27 @@ func (b *Bitboard) String() string {
 	return out.String()
 }
 
+// StringWithMark returns a string representation of the board, with one square highlighted. It's normally used for debugging.
+func (b *Bitboard) StringWithMark(mark uint8) string {
+	var out bytes.Buffer
+	unseperated := fmt.Sprintf("%064s", strconv.FormatUint(uint64(*b), 2))
+
+	chars := []rune(unseperated)
+	chars[63-mark] = 'X'
+
+	unseperated = string(chars)
+
+	for i := 0; i < 8; i++ {
+		out.WriteString(reverse(unseperated[i*8 : (i+1)*8]))
+
+		if i != 7 {
+			out.WriteString("\n")
+		}
+	}
+
+	return out.String()
+}
+
 // FirstOn returns the index (starting from the least significant bit) of the first bit that is on in the bitboard.
 //
 func (b *Bitboard) FirstOn() uint8 {
