@@ -1,5 +1,7 @@
 package position
 
+import "fmt"
+
 const (
 	DirN = +8
 	DirE = +1
@@ -54,6 +56,7 @@ func (p *Position) MovesPseudolegal() []Move {
 
 	pseudolegalMoves = append(pseudolegalMoves, p.MovesRooks()...)
 	pseudolegalMoves = append(pseudolegalMoves, p.MovesBishops()...)
+	pseudolegalMoves = append(pseudolegalMoves, p.MovesQueens()...)
 
 	return pseudolegalMoves
 }
@@ -299,11 +302,103 @@ func (p *Position) MovesBlackPawns() []Move {
 func (p *Position) MovesKing() []Move {
 	bitboard := kingMoves[p.KingLocation[p.SideToMove]] & ^p.Occupied[p.SideToMove]
 
-	return p.movesFromBitboard(
+	moves := p.movesFromBitboard(
 		King.OfColor(p.SideToMove),
 		func(to uint8) uint8 { return p.KingLocation[p.SideToMove] },
 		bitboard,
 	)
+
+	moves = append(moves, p.MovesCastling()...)
+
+	return moves
+}
+
+func (p *Position) MovesCastling() []Move {
+	moves := []Move{}
+
+	if p.SideToMove == White && !p.KingInCheck(White) {
+		if p.Castling&longW != 0 {
+			squares := []uint8{SquareB1, SquareC1, SquareD1}
+
+			failed := false
+
+			for _, square := range squares {
+				if !p.IsEmpty(square) || p.IsAttacked(square, Black) {
+					failed = true
+					break
+				}
+			}
+
+			if !failed {
+				moves = append(
+					moves,
+					NewMove(SquareE1, SquareC1, WhiteKing, Empty, None, p.Castling, p.EnPassant),
+				)
+			}
+		}
+
+		if p.Castling&shortW != 0 {
+			squares := []uint8{SquareF1, SquareG1}
+
+			failed := false
+
+			for _, square := range squares {
+				if !p.IsEmpty(square) || p.IsAttacked(square, Black) {
+					failed = true
+					break
+				}
+			}
+
+			if !failed {
+				moves = append(
+					moves,
+					NewMove(SquareE1, SquareG1, WhiteKing, Empty, None, p.Castling, p.EnPassant),
+				)
+			}
+		}
+	} else if p.SideToMove == Black && !p.KingInCheck(Black) {
+		if p.Castling&longB != 0 {
+			squares := []uint8{SquareB8, SquareC8, SquareD8}
+
+			failed := false
+
+			for _, square := range squares {
+				if !p.IsEmpty(square) || p.IsAttacked(square, White) {
+					failed = true
+					break
+				}
+			}
+
+			if !failed {
+				moves = append(
+					moves,
+					NewMove(SquareE8, SquareC8, BlackKing, Empty, None, p.Castling, p.EnPassant),
+				)
+			}
+		}
+
+		if p.Castling&shortW != 0 {
+			squares := []uint8{SquareF8, SquareG8}
+
+			failed := false
+
+			for _, square := range squares {
+				if !p.IsEmpty(square) || p.IsAttacked(square, Black) {
+					failed = true
+					break
+				}
+			}
+
+			if !failed {
+				moves = append(
+					moves,
+					NewMove(SquareE8, SquareG8, BlackKing, Empty, None, p.Castling, p.EnPassant),
+				)
+			}
+		}
+	}
+
+	return moves
 }
 
 func (p *Position) MovesKnights() []Move {
@@ -368,7 +463,39 @@ func (p *Position) MovesBishops() []Move {
 			moves = append(
 				moves,
 				p.movesFromBitboard(
-					Rook.OfColor(p.SideToMove),
+					Bishop.OfColor(p.SideToMove),
+					func(to uint8) uint8 {
+						return from
+					},
+					available,
+				)...,
+			)
+		}
+	}
+
+	return moves
+}
+
+func (p *Position) MovesQueens() []Move {
+	moves := []Move{}
+	queenLocations := p.Pieces[Queen] & p.Occupied[p.SideToMove]
+
+	for from := queenLocations.FirstOn(); from < 64 && from <= queenLocations.LastOn(); from++ {
+		if queenLocations.IsOn(from) {
+			bishopBlockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & bishopMasks[from]
+			bishopKey := (uint64(bishopBlockers) * bishopMagics[from].multiplier) >> bishopMagics[from].shift
+			bishopAvailable := bishopMoves[from][bishopKey] & ^p.Occupied[p.SideToMove]
+
+			rookBlockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & rookMasks[from]
+			rookKey := (uint64(rookBlockers) * rookMagics[from].multiplier) >> rookMagics[from].shift
+			rookAvailable := rookMoves[from][rookKey] & ^p.Occupied[p.SideToMove]
+
+			available := bishopAvailable | rookAvailable
+
+			moves = append(
+				moves,
+				p.movesFromBitboard(
+					Queen.OfColor(p.SideToMove),
 					func(to uint8) uint8 {
 						return from
 					},
@@ -842,6 +969,46 @@ func initialiseBishopMoves() [64][512]Bitboard {
 	}
 
 	return moves
+}
+
+func (p *Position) Perft(depth uint) uint {
+	nodes := uint(0)
+
+	if depth == 0 {
+		return 1
+	}
+
+	moves := p.MovesLegal()
+
+	for _, move := range moves {
+		p.MakeMove(move)
+		nodes += p.Perft(depth - 1)
+		p.UndoMove(move)
+	}
+
+	return nodes
+}
+
+func (p *Position) Divide(depth uint) uint {
+	nodes := uint(0)
+
+	if depth == 0 {
+		return 1
+	}
+
+	moves := p.MovesLegal()
+
+	for _, move := range moves {
+		p.MakeMove(move)
+		curr := p.Perft(depth - 1)
+		nodes += curr
+		fmt.Printf("%s: %d\n", move.String(), curr)
+		p.UndoMove(move)
+	}
+
+	fmt.Println("total:", nodes)
+
+	return nodes
 }
 
 func init() {

@@ -67,6 +67,12 @@ func (s *Session) Handle(commandLine string) error {
 	case "_mm", "_makemove":
 		handler = s.handleCommandMakeMove
 
+	case "_pft", "_perft":
+		handler = s.handleCommandPerft
+
+	case "_div", "_divide":
+		handler = s.handleCommandDivide
+
 	// Handle unknown commands
 	default:
 		fmt.Printf("info string don't understand %s\n", commandName)
@@ -371,11 +377,11 @@ func (s *Session) handleCommandPseudolegalMoves(arguments []string) error {
 		full = true
 	}
 
-	for _, move := range s.positions[length-1].MovesPseudolegal() {
+	for i, move := range s.positions[length-1].MovesPseudolegal() {
 		if !full {
 			fmt.Println(move.String())
 		} else {
-			fmt.Println(move.FullString())
+			fmt.Printf("(%d) %s\n", i+1, move.FullString())
 		}
 	}
 
@@ -394,11 +400,11 @@ func (s *Session) handleCommandLegalMoves(arguments []string) error {
 		full = true
 	}
 
-	for _, move := range s.positions[length-1].MovesLegal() {
+	for i, move := range s.positions[length-1].MovesLegal() {
 		if !full {
 			fmt.Println(move.String())
 		} else {
-			fmt.Println(move.FullString())
+			fmt.Printf("(%d) %s\n", i+1, move.FullString())
 		}
 	}
 
@@ -446,6 +452,44 @@ func (s *Session) handleCommandMakeMove(arguments []string) error {
 
 		s.positions[length-1].MakeMove(move)
 	}
+
+	return nil
+}
+
+func (s *Session) handleCommandPerft(arguments []string) error {
+	if len(s.positions) == 0 {
+		return fmt.Errorf("no position to analyse")
+	}
+
+	if len(arguments) != 1 {
+		return fmt.Errorf("need perft depth as an integer, got nothing")
+	}
+
+	num, err := strconv.ParseUint(arguments[0], 10, 0)
+	if err != nil {
+		return fmt.Errorf("need perft depth as an integer, got arguments %v and error: %w", arguments, err)
+	}
+
+	fmt.Println(s.positions[len(s.positions)-1].Perft(uint(num)))
+
+	return nil
+}
+
+func (s *Session) handleCommandDivide(arguments []string) error {
+	if len(s.positions) == 0 {
+		return fmt.Errorf("no position to analyse")
+	}
+
+	if len(arguments) != 1 {
+		return fmt.Errorf("need divide depth as an integer, got nothing")
+	}
+
+	num, err := strconv.ParseUint(arguments[0], 10, 0)
+	if err != nil {
+		return fmt.Errorf("need divide depth as an integer, got arguments %v and error: %w", arguments, err)
+	}
+
+	s.positions[len(s.positions)-1].Divide(uint(num))
 
 	return nil
 }
