@@ -1,7 +1,5 @@
 package position
 
-import "fmt"
-
 const (
 	DirN = +8
 	DirE = +1
@@ -33,8 +31,9 @@ func (p *Position) MovesLegal() []Move {
 	legalMoves := []Move{}
 
 	for _, move := range pseudolegalMoves {
-		if p.MakeMove(move) {
+		if p.MakeMove(move) { // If it doesn't put the king in check, add it back.
 			legalMoves = append(legalMoves, move)
+			p.UndoMove(move)
 		}
 	}
 
@@ -366,14 +365,6 @@ func (p *Position) MovesBishops() []Move {
 
 			available := bishopMoves[from][key] & ^p.Occupied[p.SideToMove]
 
-			fmt.Println("bishop blockers, marking location of bishops:")
-			fmt.Println(blockers.StringWithMark(from))
-			fmt.Println("")
-			fmt.Println("calculated available moves, marking location of bishops:")
-			fmt.Println(available.StringWithMark(from))
-			fmt.Println("")
-			fmt.Println("")
-
 			moves = append(
 				moves,
 				p.movesFromBitboard(
@@ -443,14 +434,14 @@ func initialiseKingMoves() [64]Bitboard {
 				// . . .
 				// . K .
 				// * . .
-				bitboard.On(from - 7)
+				bitboard.On(from - 9)
 			}
 
 			if file != 8 {
 				// . . .
 				// . K .
 				// . . *
-				bitboard.On(from - 9)
+				bitboard.On(from - 7)
 			}
 		}
 
@@ -634,10 +625,10 @@ func initialiseRookMasks() [64]Bitboard {
 	return moves
 }
 
-// getRookMovesFromOccupation returns the rook moves available from a given square with a bitboard representing the occupied squares
+// getRookMovesFromOccupationSlow returns the rook moves available from a given square with a bitboard representing the occupied squares
 // in its path.
 // TODO: clean up this code and make it more efficient
-func getRookMovesFromOccupation(from uint8, occupiedSquares Bitboard) Bitboard {
+func getRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
 	bitboard := Bitboard(0)
 
 	rank := (from / 8) + 1
@@ -703,7 +694,7 @@ func initialiseRookMoves() [64][4096]Bitboard {
 			index := subset
 			index = index * Bitboard(rookMagics[from].multiplier)
 			index = index >> rookMagics[from].shift
-			moves[from][index] = getRookMovesFromOccupation(from, subset)
+			moves[from][index] = getRookMovesFromOccupationSlow(from, subset)
 
 			subset = (subset - rookMasks[from]) & rookMasks[from]
 			i++
@@ -770,7 +761,7 @@ func initialiseBishopMasks() [64]Bitboard {
 	return moves
 }
 
-func getBishopMovesFromOccupation(from uint8, occupiedSquares Bitboard) Bitboard {
+func getBishopMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
 	bitboard := Bitboard(0)
 
 	for i := from; i < 64; i += 9 {
@@ -843,7 +834,7 @@ func initialiseBishopMoves() [64][512]Bitboard {
 			index := subset
 			index = index * Bitboard(bishopMagics[from].multiplier)
 			index = index >> bishopMagics[from].shift
-			moves[from][index] = getBishopMovesFromOccupation(from, subset)
+			moves[from][index] = getBishopMovesFromOccupationSlow(from, subset)
 
 			subset = (subset - bishopMasks[from]) & bishopMasks[from]
 			i++

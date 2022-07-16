@@ -397,12 +397,14 @@ func (p *Position) MakeMove(m Move) bool {
 		p.setSquare(m.To, m.Promotion.OfColor(p.SideToMove))
 	}
 
-	if p.KingInCheck() {
+	// TODO: this whole thing of inverting the side to move and then checking if the original side to move is okay seems a little convoluted
+	// is there a better way?
+	p.SideToMove = p.SideToMove.Invert()
+
+	if p.KingInCheck(p.SideToMove.Invert()) {
 		p.UndoMove(m)
 		return false
 	}
-
-	p.SideToMove = p.SideToMove.Invert()
 
 	// If the side to move is now white, we can update the fullmove clock.
 	if p.SideToMove == White {
@@ -421,13 +423,11 @@ func (p *Position) MakeMove(m Move) bool {
 
 // UndoMove undoes the last move.
 func (p *Position) UndoMove(m Move) {
-	originalPiece := p.Squares[m.To]
-
 	p.EnPassant = m.PriorEnPassantTarget
 	p.Castling = m.PriorCastling
 
 	p.setSquare(m.To, m.Captured)
-	p.setSquare(m.From, originalPiece)
+	p.setSquare(m.From, m.Moved)
 
 	if m.Moved.Colorless() == Pawn {
 		if m.To == p.EnPassant {
@@ -478,10 +478,10 @@ func (p *Position) UndoMove(m Move) {
 	return
 }
 
-// KingInCheck returns true if the current side to move has their king in check.
+// KingInCheck returns true if the given side to move has their king in check.
 // TODO: actually make this work
-func (p *Position) KingInCheck() bool {
-	return false
+func (p *Position) KingInCheck(side Color) bool {
+	return p.IsAttacked(p.KingLocation[side], side.Invert())
 }
 
 // HasEnPassant returns true if the current player has a valid en passant move.
@@ -512,8 +512,69 @@ func (p *Position) OnFileA(square uint8) bool {
 }
 
 // OnFileH returns true if the specified square is on the H-file.
+// TODO: why is this stuff a method on the struct?
 func (p *Position) OnFileH(square uint8) bool {
 	return square%8 == 7
+}
+
+// IsAttacked returns true if the square given is attacked by the color given.
+func (p *Position) IsAttacked(square uint8, color Color) bool {
+	if p.HasEnPassant() {
+		if p.Squares[square] == WhitePawn {
+			if p.EnPassant == square-8 {
+				return true
+			}
+		}
+
+		if p.Squares[square] == BlackPawn {
+			if p.EnPassant == square+8 {
+				return true
+			}
+		}
+	}
+
+	// Pawn attacks
+	if !p.OnFileA(square) {
+		if color == Black && !p.OnRank(square, 8) && p.Squares[square+7] == BlackPawn {
+			return true
+		} else if color == White && !p.OnRank(square, 1) && p.Squares[square-9] == WhitePawn {
+			return true
+		}
+	}
+
+	if !p.OnFileH(square) {
+		if color == Black && !p.OnRank(square, 8) && p.Squares[square+9] == BlackPawn {
+			return true
+		} else if color == White && !p.OnRank(square, 1) && p.Squares[square-7] == WhitePawn {
+			return true
+		}
+	}
+
+	// Knight attacks
+	if knightMoves[square]&p.Pieces[Knight]&p.Occupied[color] != 0 {
+		return true
+	}
+
+	// King attacks
+	if kingMoves[square]&p.Pieces[King]&p.Occupied[color] != 0 {
+		return true
+	}
+
+	// Rook/queen attacks
+	rookBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & rookMasks[square]
+	rookKey := (uint64(rookBlockers) * rookMagics[square].multiplier) >> uint64(rookMagics[square].shift)
+	if (rookMoves[square][rookKey] & p.Occupied[color] & (p.Pieces[Rook] | p.Pieces[Queen])) != 0 {
+		return true
+	}
+
+	// Bishop/queen attacks
+	bishopBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & bishopMasks[square]
+	bishopKey := (uint64(bishopBlockers) * bishopMagics[square].multiplier) >> uint64(bishopMagics[square].shift)
+	if (bishopMoves[square][bishopKey] & p.Occupied[color] & (p.Pieces[Bishop] | p.Pieces[Queen])) != 0 {
+		return true
+	}
+
+	return false
 }
 
 // setSquare sets a specific square on the board to a empty or to a certain piece.

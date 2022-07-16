@@ -69,3 +69,18 @@ func (m Move) String() string {
 		return SquareToString(m.From) + SquareToString(m.To) + strings.ToLower(m.Promotion.String())
 	}
 }
+
+// FullString returns a string containing all information about the move, e.g. the captured piece, the prior en passant target, etc.
+func (m Move) FullString() string {
+	return fmt.Sprintf(
+		"%s (from=%s to=%s promotion=%s moved-piece=%s captured-piece=%s castling=%s en-passant=%d)",
+		m.String(),
+		SquareToString(m.From),
+		SquareToString(m.To),
+		m.Promotion.String(),
+		m.Moved.String(),
+		m.Captured.String(),
+		m.PriorCastling.String(),
+		m.PriorEnPassantTarget,
+	)
+}

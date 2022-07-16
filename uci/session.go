@@ -55,8 +55,14 @@ func (s *Session) Handle(commandLine string) error {
 	case "_bb", "_bitboards":
 		handler = s.handleCommandBitboards
 
-	case "_pmv", "_pseudolegal":
+	case "_pmv", "_pseudolegalmoves":
 		handler = s.handleCommandPseudolegalMoves
+
+	case "_lmv", "_legalmoves":
+		handler = s.handleCommandLegalMoves
+
+	case "_isa", "_isattacked":
+		handler = s.handleCommandIsAttacked
 
 	case "_mm", "_makemove":
 		handler = s.handleCommandMakeMove
@@ -85,6 +91,10 @@ func (s *Session) handleCommandIsReady(arguments []string) error {
 	if err != nil {
 		return err
 	}
+
+	seed := time.Now().Unix()
+	fmt.Println("info string rng seed", seed)
+	rand.Seed(time.Now().Unix())
 
 	fmt.Println("readyok")
 	return nil
@@ -277,7 +287,7 @@ func (s *Session) handleCommandGo(arguments []string) error {
 	}
 
 	position := s.positions[len(s.positions)-1]
-	moves := position.MovesPseudolegal()
+	moves := position.MovesLegal()
 	move := moves[rand.Intn(len(moves))]
 
 	fmt.Println("bestmove", move)
@@ -356,10 +366,68 @@ func (s *Session) handleCommandPseudolegalMoves(arguments []string) error {
 		return fmt.Errorf("no positions to analyse")
 	}
 
-	for _, move := range s.positions[length-1].MovesPseudolegal() {
-		fmt.Println(move)
+	full := false
+	if len(arguments) == 1 && arguments[0] == "full" {
+		full = true
 	}
 
+	for _, move := range s.positions[length-1].MovesPseudolegal() {
+		if !full {
+			fmt.Println(move.String())
+		} else {
+			fmt.Println(move.FullString())
+		}
+	}
+
+	return nil
+}
+
+func (s *Session) handleCommandLegalMoves(arguments []string) error {
+	length := len(s.positions)
+
+	if length == 0 {
+		return fmt.Errorf("no positions to analyse")
+	}
+
+	full := false
+	if len(arguments) == 1 && arguments[0] == "full" {
+		full = true
+	}
+
+	for _, move := range s.positions[length-1].MovesLegal() {
+		if !full {
+			fmt.Println(move.String())
+		} else {
+			fmt.Println(move.FullString())
+		}
+	}
+
+	return nil
+}
+
+func (s *Session) handleCommandIsAttacked(arguments []string) error {
+	length := len(s.positions)
+
+	if length == 0 {
+		return fmt.Errorf("no positions to make move on")
+	}
+
+	if len(arguments) != 2 {
+		return fmt.Errorf("need a square and a color")
+	}
+
+	square := position.StringToSquare(arguments[0])
+
+	var side position.Color
+
+	switch arguments[1][0] {
+	case 'w':
+		side = position.White
+	case 'b':
+		side = position.Black
+	}
+
+	fmt.Println(s.positions[length-1].IsAttacked(square, side))
 	return nil
 }
 
