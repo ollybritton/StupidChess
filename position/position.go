@@ -358,14 +358,28 @@ func (p *Position) MakeMove(m Move) bool {
 		// Disable castling for the king on the side where the rook has moved.
 		if m.From == SquareA1 {
 			p.Castling.off(longW)
-		} else {
+		} else if m.From == SquareH1 {
 			p.Castling.off(shortW)
 		}
 	case movingPiece == BlackRook:
 		// Disable castling for the king on the side where the rook has moved.
 		if m.From == SquareA8 {
 			p.Castling.off(longB)
-		} else {
+		} else if m.From == SquareH8 {
+			p.Castling.off(shortB)
+		}
+	case p.Squares[m.To] == WhiteRook:
+		// Disable castling when a white rook is taken.
+		if m.To == SquareA1 {
+			p.Castling.off(longW)
+		} else if m.To == SquareH1 {
+			p.Castling.off(shortW)
+		}
+	case p.Squares[m.To] == BlackRook:
+		// Disable castling when a black rook is taken.
+		if m.To == SquareA8 {
+			p.Castling.off(longB)
+		} else if m.To == SquareH8 {
 			p.Castling.off(shortB)
 		}
 	case movingPiece == WhitePawn && p.Squares[m.To] == Empty:
@@ -375,7 +389,7 @@ func (p *Position) MakeMove(m Move) bool {
 			newEnPassantTarget = m.From + 8
 		} else if m.To-m.From == 7 || m.To-m.From == 9 {
 			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
-			p.setSquare(m.From+8, Empty)
+			p.setSquare(p.EnPassant-8, Empty)
 		}
 	case movingPiece == BlackPawn && p.Squares[m.To] == Empty:
 		if m.From-m.To == 16 {
@@ -384,7 +398,7 @@ func (p *Position) MakeMove(m Move) bool {
 			newEnPassantTarget = m.To + 8
 		} else if m.From-m.To == 7 || m.From-m.To == 9 {
 			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
-			p.setSquare(m.To+8, Empty)
+			p.setSquare(p.EnPassant+8, Empty)
 		}
 	}
 
@@ -446,7 +460,7 @@ func (p *Position) UndoMove(m Move) {
 		sideMoving := m.Moved.Color()
 
 		switch int(m.To) - int(m.From) {
-		case 2: // Short castling
+		case 2: // Short castling for white, long castling for black
 			if sideMoving == White {
 				p.setSquare(SquareH1, WhiteRook)
 				p.setSquare(SquareF1, Empty)
@@ -455,13 +469,13 @@ func (p *Position) UndoMove(m Move) {
 				p.setSquare(SquareF8, Empty)
 			}
 
-		case -2: // Long castling
+		case -2: // Long castling for white, short castling for black
 			if sideMoving == White {
 				p.setSquare(SquareA1, WhiteRook)
 				p.setSquare(SquareD1, Empty)
 			} else if sideMoving == Black {
 				p.setSquare(SquareA8, BlackRook)
-				p.setSquare(SquareD8, BlackRook)
+				p.setSquare(SquareD8, Empty)
 			}
 		}
 	}
@@ -475,7 +489,6 @@ func (p *Position) UndoMove(m Move) {
 
 	// TODO: update proper recovery of the fullmove and halfmove clock
 
-	return
 }
 
 // KingInCheck returns true if the given side to move has their king in check.
@@ -570,11 +583,7 @@ func (p *Position) IsAttacked(square uint8, color Color) bool {
 	// Bishop/queen attacks
 	bishopBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & bishopMasks[square]
 	bishopKey := (uint64(bishopBlockers) * bishopMagics[square].multiplier) >> uint64(bishopMagics[square].shift)
-	if (bishopMoves[square][bishopKey] & p.Occupied[color] & (p.Pieces[Bishop] | p.Pieces[Queen])) != 0 {
-		return true
-	}
-
-	return false
+	return (bishopMoves[square][bishopKey] & p.Occupied[color] & (p.Pieces[Bishop] | p.Pieces[Queen])) != 0
 }
 
 // setSquare sets a specific square on the board to a empty or to a certain piece.

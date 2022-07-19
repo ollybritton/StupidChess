@@ -33,7 +33,7 @@ func (p *Position) MovesLegal() []Move {
 	legalMoves := []Move{}
 
 	for _, move := range pseudolegalMoves {
-		if p.MakeMove(move) { // If it doesn't put the king in check, add it back.
+		if p.MakeMove(move) {
 			legalMoves = append(legalMoves, move)
 			p.UndoMove(move)
 		}
@@ -108,7 +108,7 @@ func (p *Position) MovesWhitePawns() []Move {
 		}
 	}
 
-	// Remove moves that would lead to promotion
+	// Remove moves that would lead to promotion, since these have already been handled.
 	oneStep = oneStep & ^maskRank8
 	twoSteps = twoSteps & ^maskRank8
 	capturesLeft = capturesLeft & ^maskRank8
@@ -119,8 +119,8 @@ func (p *Position) MovesWhitePawns() []Move {
 	if p.EnPassant != 0 {
 		enPassant := Bitboard(1) << uint(p.EnPassant)
 
-		enPassantLeft = ((whitePawns & ^maskFileA) << DirNW) & enPassant
-		enPassantRight = ((whitePawns & ^maskFileH) << DirNE) & enPassant
+		enPassantLeft = ((whitePawns & ^maskFileA) << DirNW) & enPassant & ^(p.Occupied[p.SideToMove] | p.Occupied[p.SideToMove.Invert()])
+		enPassantRight = ((whitePawns & ^maskFileH) << DirNE) & enPassant & ^(p.Occupied[p.SideToMove] | p.Occupied[p.SideToMove.Invert()])
 
 		if enPassantLeft != 0 {
 			from := p.EnPassant - DirNW
@@ -238,8 +238,8 @@ func (p *Position) MovesBlackPawns() []Move {
 	if p.EnPassant != 0 {
 		enPassant := Bitboard(1) << uint(p.EnPassant)
 
-		enPassantLeft = ((blackPawns & ^maskFileA) >> DirNW) & enPassant
-		enPassantRight = ((blackPawns & ^maskFileH) >> DirNE) & enPassant
+		enPassantLeft = ((blackPawns & ^maskFileH) >> DirNW) & enPassant & ^(p.Occupied[p.SideToMove] | p.Occupied[p.SideToMove.Invert()])
+		enPassantRight = ((blackPawns & ^maskFileA) >> DirNE) & enPassant & ^(p.Occupied[p.SideToMove] | p.Occupied[p.SideToMove.Invert()])
 
 		if enPassantLeft != 0 {
 			from := p.EnPassant + DirNW
@@ -318,7 +318,7 @@ func (p *Position) MovesCastling() []Move {
 
 	if p.SideToMove == White && !p.KingInCheck(White) {
 		if p.Castling&longW != 0 {
-			squares := []uint8{SquareB1, SquareC1, SquareD1}
+			squares := []uint8{SquareC1, SquareD1}
 
 			failed := false
 
@@ -329,7 +329,7 @@ func (p *Position) MovesCastling() []Move {
 				}
 			}
 
-			if !failed {
+			if !failed && p.Squares[SquareB1] == Empty {
 				moves = append(
 					moves,
 					NewMove(SquareE1, SquareC1, WhiteKing, Empty, None, p.Castling, p.EnPassant),
@@ -358,7 +358,7 @@ func (p *Position) MovesCastling() []Move {
 		}
 	} else if p.SideToMove == Black && !p.KingInCheck(Black) {
 		if p.Castling&longB != 0 {
-			squares := []uint8{SquareB8, SquareC8, SquareD8}
+			squares := []uint8{SquareC8, SquareD8}
 
 			failed := false
 
@@ -369,7 +369,7 @@ func (p *Position) MovesCastling() []Move {
 				}
 			}
 
-			if !failed {
+			if !failed && p.Squares[SquareB8] == Empty {
 				moves = append(
 					moves,
 					NewMove(SquareE8, SquareC8, BlackKing, Empty, None, p.Castling, p.EnPassant),
@@ -377,13 +377,13 @@ func (p *Position) MovesCastling() []Move {
 			}
 		}
 
-		if p.Castling&shortW != 0 {
+		if p.Castling&shortB != 0 {
 			squares := []uint8{SquareF8, SquareG8}
 
 			failed := false
 
 			for _, square := range squares {
-				if !p.IsEmpty(square) || p.IsAttacked(square, Black) {
+				if !p.IsEmpty(square) || p.IsAttacked(square, White) {
 					failed = true
 					break
 				}
@@ -433,6 +433,7 @@ func (p *Position) MovesRooks() []Move {
 			blockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & rookMasks[from]
 			key := (uint64(blockers) * rookMagics[from].multiplier) >> rookMagics[from].shift
 
+			available := rookMoves[from][key] & ^p.Occupied[p.SideToMove]
 			moves = append(
 				moves,
 				p.movesFromBitboard(
@@ -440,7 +441,7 @@ func (p *Position) MovesRooks() []Move {
 					func(to uint8) uint8 {
 						return from
 					},
-					rookMoves[from][key] & ^p.Occupied[p.SideToMove],
+					available,
 				)...,
 			)
 		}
@@ -752,10 +753,11 @@ func initialiseRookMasks() [64]Bitboard {
 	return moves
 }
 
-// getRookMovesFromOccupationSlow returns the rook moves available from a given square with a bitboard representing the occupied squares
+// GetRookMovesFromOccupationSlow returns the rook moves available from a given square with a bitboard representing the occupied squares
 // in its path.
 // TODO: clean up this code and make it more efficient
-func getRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
+// TODO: make this private
+func GetRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
 	bitboard := Bitboard(0)
 
 	rank := (from / 8) + 1
@@ -775,10 +777,14 @@ func getRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboa
 		}
 	}
 
-	for i := from; i >= limitBottom && i >= 8; i -= 8 {
+	for i := from; i >= limitBottom; i -= 8 {
 		bitboard.On(i)
 
 		if occupiedSquares.IsOn(i) {
+			break
+		}
+
+		if i < 8 {
 			break
 		}
 	}
@@ -791,10 +797,14 @@ func getRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboa
 		}
 	}
 
-	for i := from; i >= limitLeft && i >= 1; i-- {
+	for i := from; i >= limitLeft; i-- {
 		bitboard.On(i)
 
 		if occupiedSquares.IsOn(i) {
+			break
+		}
+
+		if i < 1 {
 			break
 		}
 	}
@@ -821,7 +831,7 @@ func initialiseRookMoves() [64][4096]Bitboard {
 			index := subset
 			index = index * Bitboard(rookMagics[from].multiplier)
 			index = index >> rookMagics[from].shift
-			moves[from][index] = getRookMovesFromOccupationSlow(from, subset)
+			moves[from][index] = GetRookMovesFromOccupationSlow(from, subset)
 
 			subset = (subset - rookMasks[from]) & rookMasks[from]
 			i++
@@ -972,18 +982,18 @@ func initialiseBishopMoves() [64][512]Bitboard {
 }
 
 func (p *Position) Perft(depth uint) uint {
+	pseudolegalMoves := p.MovesPseudolegal()
 	nodes := uint(0)
 
 	if depth == 0 {
 		return 1
 	}
 
-	moves := p.MovesLegal()
-
-	for _, move := range moves {
-		p.MakeMove(move)
-		nodes += p.Perft(depth - 1)
-		p.UndoMove(move)
+	for _, move := range pseudolegalMoves {
+		if p.MakeMove(move) {
+			nodes += p.Perft(depth - 1)
+			p.UndoMove(move)
+		}
 	}
 
 	return nodes

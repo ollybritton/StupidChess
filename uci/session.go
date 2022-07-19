@@ -14,6 +14,7 @@ import (
 type Session struct {
 	engine    engines.Engine
 	positions []*position.Position
+	moves     []position.Move
 }
 
 func NewSession(eng engines.Engine) *Session {
@@ -72,6 +73,12 @@ func (s *Session) Handle(commandLine string) error {
 
 	case "_div", "_divide":
 		handler = s.handleCommandDivide
+
+	case "_fen", "_printfen":
+		handler = s.handleCommandFen
+
+	case "_um", "_undomove":
+		handler = s.handleCommandUndoMove
 
 	// Handle unknown commands
 	default:
@@ -450,7 +457,13 @@ func (s *Session) handleCommandMakeMove(arguments []string) error {
 			return err
 		}
 
+		move.PriorCastling = s.positions[length-1].Castling
+		move.PriorEnPassantTarget = s.positions[length-1].EnPassant
+		move.Moved = s.positions[length-1].Squares[move.From]
+		move.Captured = s.positions[length-1].Squares[move.To]
+
 		s.positions[length-1].MakeMove(move)
+		s.moves = append(s.moves, move)
 	}
 
 	return nil
@@ -490,6 +503,35 @@ func (s *Session) handleCommandDivide(arguments []string) error {
 	}
 
 	s.positions[len(s.positions)-1].Divide(uint(num))
+
+	return nil
+}
+
+func (s *Session) handleCommandFen(arguments []string) error {
+	length := len(s.positions)
+	if length == 0 {
+		return fmt.Errorf("no position to analyse")
+	}
+
+	pos := s.positions[length-1]
+	fmt.Println(pos.StringFEN())
+
+	return nil
+}
+
+func (s *Session) handleCommandUndoMove(arguments []string) error {
+	movesLength := len(s.moves)
+	if movesLength == 0 {
+		return fmt.Errorf("no moves to undo")
+	}
+
+	positionsLength := len(s.positions)
+	if positionsLength == 0 {
+		return fmt.Errorf("no position to analyse")
+	}
+
+	move := s.moves[movesLength-1]
+	s.positions[positionsLength-1].UndoMove(move)
 
 	return nil
 }
