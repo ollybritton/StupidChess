@@ -1,6 +1,9 @@
 package position
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	DirN = +8
@@ -1000,23 +1003,28 @@ func (p *Position) Perft(depth uint) uint {
 }
 
 func (p *Position) Divide(depth uint) uint {
+	pseudolegalMoves := p.MovesPseudolegal()
 	nodes := uint(0)
 
 	if depth == 0 {
 		return 1
 	}
 
-	moves := p.MovesLegal()
+	start := time.Now()
 
-	for _, move := range moves {
-		p.MakeMove(move)
-		curr := p.Perft(depth - 1)
-		nodes += curr
-		fmt.Printf("%s: %d\n", move.String(), curr)
-		p.UndoMove(move)
+	for _, move := range pseudolegalMoves {
+		if p.MakeMove(move) {
+			curr := p.Perft(depth - 1)
+			nodes += curr
+			fmt.Printf("%s: %d\n", move.String(), curr)
+			p.UndoMove(move)
+		}
 	}
 
+	duration := time.Since(start)
+
 	fmt.Println("total:", nodes)
+	fmt.Printf("speed: %.2fkn/s\n", float64(nodes/1000)/duration.Seconds())
 
 	return nodes
 }
