@@ -425,7 +425,7 @@ func (p *Position) MakeMove(m Move) bool {
 		p.FullMoves += 1
 	}
 
-	// If there has been no capture and it's not a pawn move, then we need to incremement the halfmove clock.
+	// If there has been no capture and it's not a pawn move, then we need to increment the halfmove clock.
 	if movingPiece != WhitePawn && movingPiece != BlackPawn && p.Squares[m.To] != Empty {
 		p.HalfmoveClock += 1
 	} else {
@@ -581,7 +581,7 @@ func (p *Position) IsAttacked(square uint8, color Color) bool {
 	}
 
 	// Bishop/queen attacks
-	bishopBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & bishopMasks[square]
+	bishopBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & BishopMasks[square]
 	bishopKey := (uint64(bishopBlockers) * bishopMagics[square].multiplier) >> uint64(bishopMagics[square].shift)
 	return (bishopMoves[square][bishopKey] & p.Occupied[color] & (p.Pieces[Bishop] | p.Pieces[Queen])) != 0
 }

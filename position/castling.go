@@ -2,6 +2,10 @@ package position
 
 // CastlingAvailability stores information about whether either player can castle in the current position.
 //   0b0000XYZW
+// X is black castling long.
+// Y is black castling short.
+// Z is white castling long.
+// W is white castling short.
 type CastlingAvailability uint8
 
 const (

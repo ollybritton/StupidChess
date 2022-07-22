@@ -94,5 +94,6 @@ engine.sh # used for debugging uci
 engine.sh.x # used for debugging uci
 engine.sh.c # used for debugging uci
 logs/
+profiles/
 stupidchess
 .vscode/*
