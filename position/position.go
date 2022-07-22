@@ -581,7 +581,7 @@ func (p *Position) IsAttacked(square uint8, color Color) bool {
 	}
 
 	// Bishop/queen attacks
-	bishopBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & BishopMasks[square]
+	bishopBlockers := (p.Occupied[color.Invert()] | p.Occupied[color]) & bishopMasks[square]
 	bishopKey := (uint64(bishopBlockers) * bishopMagics[square].multiplier) >> uint64(bishopMagics[square].shift)
 	return (bishopMoves[square][bishopKey] & p.Occupied[color] & (p.Pieces[Bishop] | p.Pieces[Queen])) != 0
 }

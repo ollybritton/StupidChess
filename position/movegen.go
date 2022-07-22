@@ -24,7 +24,7 @@ var (
 
 	// Pre-initialised tables of rook and bishop masks to find the blockers on the board from a particular square
 	rookMasks   [64]Bitboard
-	BishopMasks [64]Bitboard
+	bishopMasks [64]Bitboard
 
 	// Pre-initialised tables of rook and bishop moves from a square given an index calculated using a magic number.
 	rookMoves   [64][4096]Bitboard
@@ -401,6 +401,9 @@ func (p *Position) MovesKnights() []Move {
 	return moves
 }
 
+// MovesRooks generates the rook moves for the current side to move using the magic bitboards algorithm.
+//
+// In summary, this uses the magic numbers in the magic.go file to quickly look up the available rook moves in a pre-populated table.
 func (p *Position) MovesRooks() []Move {
 	moves := []Move{}
 	rookLocations := p.Pieces[Rook] & p.Occupied[p.SideToMove]
@@ -427,13 +430,16 @@ func (p *Position) MovesRooks() []Move {
 	return moves
 }
 
+// MovesBishops generates the list of rook moves for the current side to move using the magic bitboards algorithm.
+//
+// In summary, this uses the magic numbers in the magic.go file to quickly look up the available rook moves in a pre-populated table.
 func (p *Position) MovesBishops() []Move {
 	moves := []Move{}
 	bishopLocations := p.Pieces[Bishop] & p.Occupied[p.SideToMove]
 
 	for from := bishopLocations.FirstOn(); from < 64 && from <= bishopLocations.LastOn(); from++ {
 		if bishopLocations.IsOn(from) {
-			blockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & BishopMasks[from]
+			blockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & bishopMasks[from]
 			key := (uint64(blockers) * bishopMagics[from].multiplier) >> bishopMagics[from].shift
 
 			available := bishopMoves[from][key] & ^p.Occupied[p.SideToMove]
@@ -454,13 +460,14 @@ func (p *Position) MovesBishops() []Move {
 	return moves
 }
 
+// MovesQueens generates the list of queen moves for the current side to move by looking up the moves for a rook and a bishop from that square.
 func (p *Position) MovesQueens() []Move {
 	moves := []Move{}
 	queenLocations := p.Pieces[Queen] & p.Occupied[p.SideToMove]
 
 	for from := queenLocations.FirstOn(); from < 64 && from <= queenLocations.LastOn(); from++ {
 		if queenLocations.IsOn(from) {
-			bishopBlockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & BishopMasks[from]
+			bishopBlockers := (p.Occupied[p.SideToMove.Invert()] | p.Occupied[p.SideToMove]) & bishopMasks[from]
 			bishopKey := (uint64(bishopBlockers) * bishopMagics[from].multiplier) >> bishopMagics[from].shift
 			bishopAvailable := bishopMoves[from][bishopKey] & ^p.Occupied[p.SideToMove]
 
@@ -676,8 +683,37 @@ func initialiseKnightMoves() [64]Bitboard {
 	return moves
 }
 
-// initiailiseRookMasks pre-populates the table of rook masks representing the possible squares a rook can travel to on an
-// empty board from a given square
+// initialiseRookMasks generates bitboards for masks that can be used to find all the blockers in a rook's attack path.
+// This uses quite a slow method of calculating the masks but this is only run once at the beginning of the program and
+// then the results are stored to be reused.
+//
+// For example, for the square B4:
+//
+//   0 0 0 0 0 0 0 0
+//   0 1 0 0 0 0 0 0
+//   0 1 0 0 0 0 0 0
+//   0 1 0 0 0 0 0 0
+//   0 0 1 1 1 1 1 0
+//   0 1 0 0 0 0 0 0
+//   0 1 0 0 0 0 0 0
+//   0 0 0 0 0 0 0 0
+//
+// Or the square D5:
+//
+//   0 0 0 0 0 0 0 0
+//   0 0 0 1 0 0 0 0
+//   0 0 0 1 0 0 0 0
+//   0 1 1 0 1 1 1 0
+//   0 0 0 1 0 0 0 0
+//   0 0 0 1 0 0 0 0
+//   0 0 0 1 0 0 0 0
+//   0 0 0 0 0 0 0 0
+//
+// The bits on the perimeter don't matter because regardless of what's there, it doesn't have any effect on the squares the
+// bishop can attack. If there is no piece there, then the attack ends there because the end of the board is reached, and
+// if there is a piece there, it will still be able to be attacked and it doesn't block any squares.
+//
+// This means that 4 bits can be saved for the key to the actual bishop attacks calculated.
 func initialiseRookMasks() [64]Bitboard {
 	moves := [64]Bitboard{}
 
@@ -703,7 +739,6 @@ func initialiseRookMasks() [64]Bitboard {
 
 		// This may not be the most efficient way to do this, but since this only runs once at the start of the
 		// program it is fine for now.
-		// TODO: clean up rook mask generation code
 		bitboard.Off(limitBottom)
 		bitboard.Off(limitTop)
 		bitboard.Off(limitRight)
@@ -716,11 +751,10 @@ func initialiseRookMasks() [64]Bitboard {
 	return moves
 }
 
-// GetRookMovesFromOccupationSlow returns the rook moves available from a given square with a bitboard representing the occupied squares
-// in its path.
-// TODO: clean up this code and make it more efficient
-// TODO: make this private
-func GetRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
+// getRookMovesFromOccupationSlow returns the rook moves available from a given square with a bitboard representing the blockers
+// in its path. It is slow compared to the magic bitboards approach that is used during actual move generation, but is needed because it initialises
+// the magic bitboard table.
+func getRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
 	bitboard := Bitboard(0)
 
 	rank := (from / 8) + 1
@@ -777,6 +811,7 @@ func GetRookMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboa
 	return bitboard
 }
 
+// initialiseRookMoves generates the rook moves table that is indexed by the calculated key from the blockers.
 func initialiseRookMoves() [64][4096]Bitboard {
 	moves := [64][4096]Bitboard{}
 
@@ -794,7 +829,7 @@ func initialiseRookMoves() [64][4096]Bitboard {
 			index := subset
 			index = index * Bitboard(rookMagics[from].multiplier)
 			index = index >> rookMagics[from].shift
-			moves[from][index] = GetRookMovesFromOccupationSlow(from, subset)
+			moves[from][index] = getRookMovesFromOccupationSlow(from, subset)
 
 			subset = (subset - rookMasks[from]) & rookMasks[from]
 			i++
@@ -898,7 +933,7 @@ func initialiseBishopMasks() [64]Bitboard {
 		}
 
 		bitboard.Off(from)
-		bitboard &= maskNonPerimiterSquares
+		bitboard &= maskNonPerimeterSquares
 
 		moves[from] = bitboard
 	}
@@ -906,9 +941,15 @@ func initialiseBishopMasks() [64]Bitboard {
 	return moves
 }
 
+// getBishopMovesFromOccupationSlow returns the bishop moves available from a given square with a bitboard representing the blockers
+// in its path. It is slow compared to the magic bitboards approach that is used during actual move generation, but is needed because it initialises
+// the magic bitboard table.
 func getBishopMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitboard {
 	bitboard := Bitboard(0)
 
+	// . . *
+	// . B .
+	// . . .
 	for i := from; i < 64; i += 9 {
 		if i%8 <= from%8 && i != from {
 			break
@@ -921,7 +962,12 @@ func getBishopMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitb
 		}
 	}
 
-	for i := from; i >= 0; i -= 9 {
+	// The condition on this for loop would be i >= 0, but since it's a uint this will always be true.
+	// Instead the i < 9 checks if the subtraction will overflow and breaks inside the for-loop.
+	// . . .
+	// . B .
+	// . . *
+	for i := from; ; i -= 9 {
 		if i%8 >= from%8 && i != from {
 			break
 		}
@@ -933,6 +979,9 @@ func getBishopMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitb
 		}
 	}
 
+	// * . .
+	// . B .
+	// . . .
 	for i := from; i < 64; i += 7 {
 		if i%8 >= from%8 && i != from {
 			break
@@ -945,7 +994,12 @@ func getBishopMovesFromOccupationSlow(from uint8, occupiedSquares Bitboard) Bitb
 		}
 	}
 
-	for i := from; i >= 0 && i < 64; i -= 7 {
+	// The condition on this for loop would be i >= 0, but since it's a uint this will always be true.
+	// Instead the i < 7 checks if the subtraction will overflow and breaks inside the for-loop.
+	// . . .
+	// . B .
+	// * . .
+	for i := from; ; i -= 7 {
 		if i%8 <= from%8 && i != from {
 			break
 		}
@@ -981,7 +1035,7 @@ func initialiseBishopMoves() [64][512]Bitboard {
 			index = index >> bishopMagics[from].shift
 			moves[from][index] = getBishopMovesFromOccupationSlow(from, subset)
 
-			subset = (subset - BishopMasks[from]) & BishopMasks[from]
+			subset = (subset - bishopMasks[from]) & bishopMasks[from]
 			i++
 		}
 	}
@@ -989,6 +1043,7 @@ func initialiseBishopMoves() [64][512]Bitboard {
 	return moves
 }
 
+// Perft returns the number of possible games after a certain number of moves in the current position.
 func (p *Position) Perft(depth uint) uint {
 	pseudolegalMoves := p.MovesPseudolegal()
 	nodes := uint(0)
@@ -1007,6 +1062,34 @@ func (p *Position) Perft(depth uint) uint {
 	return nodes
 }
 
+// Divide returns the number of possible games after a certain number of moves in the current position, broken down by the initial move made in
+// that position.
+// For example, in the starting position, Divide(5) outputs
+//
+//   a2a3: 181046
+//   b2b3: 215255
+//   c2c3: 222861
+//   d2d3: 328511
+//   e2e3: 402988
+//   f2f3: 178889
+//   g2g3: 217210
+//   h2h3: 181044
+//   a2a4: 217832
+//   b2b4: 216145
+//   c2c4: 240082
+//   d2d4: 361790
+//   e2e4: 405385
+//   f2f4: 198473
+//   g2g4: 214048
+//   h2h4: 218829
+//   b1a3: 198572
+//   b1c3: 234656
+//   g1f3: 233491
+//   g1h3: 198502
+//
+//   total: 4865609
+//   speed: 1189.81kn/s
+//
 func (p *Position) Divide(depth uint) uint {
 	pseudolegalMoves := p.MovesPseudolegal()
 	nodes := uint(0)
@@ -1041,7 +1124,7 @@ func init() {
 
 	// Pre-initialised tables of rook and bishop masks to find the blockers on the board from a particular square
 	rookMasks = initialiseRookMasks()
-	BishopMasks = initialiseBishopMasks()
+	bishopMasks = initialiseBishopMasks()
 
 	// Pre-initialised tables of rook and bishop moves from a square given an index calculated using a magic number.
 	rookMoves = initialiseRookMoves()

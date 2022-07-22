@@ -1,12 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"os"
 
-	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/cmd/stupidchess/cmd"
 )
 
 func logOutput() func() {
@@ -50,9 +49,8 @@ func logOutput() func() {
 }
 
 func main() {
-	// fn := logOutput()
-	// defer fn()
+	fn := logOutput()
+	defer fn()
 
-	// cmd.Execute()
-	fmt.Println(position.BishopMasks[position.SquareD5].String())
+	cmd.Execute()
 }
