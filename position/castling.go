@@ -49,11 +49,6 @@ func (c *CastlingAvailability) off(castlingType CastlingAvailability) {
 	(*c) &= ^castlingType
 }
 
-// on enables a type of castling.
-func (c *CastlingAvailability) on(castlingType CastlingAvailability) {
-	(*c) |= castlingType
-}
-
 // castlingAvailabilityFromString returns a CastlingAvailability from a FEN-formatted castling string.
 func castlingAvailabilityFromString(str string) CastlingAvailability {
 	var out CastlingAvailability

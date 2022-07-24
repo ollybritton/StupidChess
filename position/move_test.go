@@ -25,9 +25,9 @@ func TestParseMoveValid(t *testing.T) {
 		move, err := ParseMove(test.in)
 
 		assert.NoError(t, err)
-		assert.Equal(t, test.expectedFrom, move.From)
-		assert.Equal(t, test.expectedTo, move.To)
-		assert.Equal(t, test.expectedPromotion, move.Promotion)
+		assert.Equal(t, test.expectedFrom, move.From())
+		assert.Equal(t, test.expectedTo, move.To())
+		assert.Equal(t, test.expectedPromotion, move.Promotion())
 	}
 }
 

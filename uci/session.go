@@ -294,14 +294,9 @@ func (s *Session) handleCommandGo(arguments []string) error {
 		i++
 	}
 
-	// TODO: remove me
-	if len(s.positions) == 0 {
-		panic("uh-oh")
-	}
-
 	position := s.positions[len(s.positions)-1]
 	moves := position.MovesLegal()
-	move := moves[rand.Intn(len(moves))]
+	move := moves.AsSlice()[rand.Intn(moves.Length())]
 
 	fmt.Println("bestmove", move)
 
@@ -384,7 +379,7 @@ func (s *Session) handleCommandPseudolegalMoves(arguments []string) error {
 		full = true
 	}
 
-	for i, move := range s.positions[length-1].MovesPseudolegal() {
+	for i, move := range s.positions[length-1].MovesPseudolegal().AsSlice() {
 		if !full {
 			fmt.Println(move.String())
 		} else {
@@ -407,7 +402,7 @@ func (s *Session) handleCommandLegalMoves(arguments []string) error {
 		full = true
 	}
 
-	for i, move := range s.positions[length-1].MovesLegal() {
+	for i, move := range s.positions[length-1].MovesLegal().AsSlice() {
 		if !full {
 			fmt.Println(move.String())
 		} else {
@@ -451,16 +446,25 @@ func (s *Session) handleCommandMakeMove(arguments []string) error {
 		return fmt.Errorf("no positions to make move on")
 	}
 
+	currPosition := s.positions[length-1]
+
 	for _, moveStr := range arguments {
-		move, err := position.ParseMove(moveStr)
+		// TODO: Defining the move twice like this is a bit iffy, just doing it like this because the parse move
+		// function doesn't know anything about the position. Maybe parseMove should take a position.
+		incompleteMove, err := position.ParseMove(moveStr)
 		if err != nil {
 			return err
 		}
 
-		move.PriorCastling = s.positions[length-1].Castling
-		move.PriorEnPassantTarget = s.positions[length-1].EnPassant
-		move.Moved = s.positions[length-1].Squares[move.From]
-		move.Captured = s.positions[length-1].Squares[move.To]
+		move := position.NewMove(
+			incompleteMove.From(),
+			incompleteMove.To(),
+			currPosition.Squares[incompleteMove.From()],
+			currPosition.Squares[incompleteMove.To()],
+			incompleteMove.Promotion(),
+			currPosition.Castling,
+			currPosition.EnPassant,
+		)
 
 		s.positions[length-1].MakeMove(move)
 		s.moves = append(s.moves, move)

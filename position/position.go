@@ -25,6 +25,7 @@ type Position struct {
 }
 
 const StartingPosition string = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+const NoEnPassant uint8 = 255
 
 // NewPositionFromFEN converts a valid FEN string into a Board struct.
 // FEN strings look like so:
@@ -145,7 +146,7 @@ func NewPositionFromFEN(input string) (*Position, error) {
 
 	var enPassantTarget uint8
 	if rawEnPassantTarget == "-" {
-		enPassantTarget = 255
+		enPassantTarget = NoEnPassant
 	} else {
 		enPassantTarget = StringToSquare(rawEnPassantTarget)
 	}
@@ -318,8 +319,8 @@ func (p *Position) MakeMove(m Move) bool {
 	// - Black pawn moving forward two squares onto an empty square
 	// (These two cases either perform an en passant capture or set the en passant target square)
 
-	movingPiece := p.Squares[m.From]
-	var newEnPassantTarget uint8 = 255
+	movingPiece := p.Squares[m.From()]
+	var newEnPassantTarget uint8 = NoEnPassant
 
 	switch {
 	case movingPiece == WhiteKing:
@@ -328,9 +329,9 @@ func (p *Position) MakeMove(m Move) bool {
 
 		// The king has moved two squares and so it is known they have castled.
 		// Here we only need to worry about moving the rook, as the king is moved by the general code outside of the switch.
-		if abs(int(m.From)-int(m.To)) == 2 {
+		if abs(int(m.From())-int(m.To())) == 2 {
 			// Determine if they have castled long or short.
-			if m.To == SquareG1 { // Short castle
+			if m.To() == SquareG1 { // Short castle
 				p.setSquare(SquareF1, WhiteRook)
 				p.setSquare(SquareH1, Empty)
 			} else { // Long castle
@@ -344,9 +345,9 @@ func (p *Position) MakeMove(m Move) bool {
 
 		// The king has moved two squares and so it is known they have castled.
 		// Here we only need to worry about moving the rook, as the king is moved by the general code outside of the switch.
-		if abs(int(m.From)-int(m.To)) == 2 {
+		if abs(int(m.From())-int(m.To())) == 2 {
 			// Determine if they have castled long or short.
-			if m.To == SquareG8 { // Short castle
+			if m.To() == SquareG8 { // Short castle
 				p.setSquare(SquareF8, BlackRook)
 				p.setSquare(SquareH8, Empty)
 			} else { // Long castle
@@ -356,63 +357,61 @@ func (p *Position) MakeMove(m Move) bool {
 		}
 	case movingPiece == WhiteRook:
 		// Disable castling for the king on the side where the rook has moved.
-		if m.From == SquareA1 {
+		if m.From() == SquareA1 {
 			p.Castling.off(longW)
-		} else if m.From == SquareH1 {
+		} else if m.From() == SquareH1 {
 			p.Castling.off(shortW)
 		}
 	case movingPiece == BlackRook:
 		// Disable castling for the king on the side where the rook has moved.
-		if m.From == SquareA8 {
+		if m.From() == SquareA8 {
 			p.Castling.off(longB)
-		} else if m.From == SquareH8 {
+		} else if m.From() == SquareH8 {
 			p.Castling.off(shortB)
 		}
-	case p.Squares[m.To] == WhiteRook:
+	case p.Squares[m.To()] == WhiteRook:
 		// Disable castling when a white rook is taken.
-		if m.To == SquareA1 {
+		if m.To() == SquareA1 {
 			p.Castling.off(longW)
-		} else if m.To == SquareH1 {
+		} else if m.To() == SquareH1 {
 			p.Castling.off(shortW)
 		}
-	case p.Squares[m.To] == BlackRook:
+	case p.Squares[m.To()] == BlackRook:
 		// Disable castling when a black rook is taken.
-		if m.To == SquareA8 {
+		if m.To() == SquareA8 {
 			p.Castling.off(longB)
-		} else if m.To == SquareH8 {
+		} else if m.To() == SquareH8 {
 			p.Castling.off(shortB)
 		}
-	case movingPiece == WhitePawn && p.Squares[m.To] == Empty:
-		if m.To-m.From == 16 {
+	case movingPiece == WhitePawn && p.Squares[m.To()] == Empty:
+		if m.To()-m.From() == 16 {
 			// The pawn has moved two full squares onto an empty square.
 			// Therefore there is a new en passant target on the rank between its original position and its new position.
-			newEnPassantTarget = m.From + 8
-		} else if m.To-m.From == 7 || m.To-m.From == 9 {
+			newEnPassantTarget = m.From() + 8
+		} else if m.To()-m.From() == 7 || m.To()-m.From() == 9 {
 			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
 			p.setSquare(p.EnPassant-8, Empty)
 		}
-	case movingPiece == BlackPawn && p.Squares[m.To] == Empty:
-		if m.From-m.To == 16 {
+	case movingPiece == BlackPawn && p.Squares[m.To()] == Empty:
+		if m.From()-m.To() == 16 {
 			// The pawn has moved two full squares onto an empty square.
 			// Therefore there is a new en passant target on the rank between its original position and its new position.
-			newEnPassantTarget = m.To + 8
-		} else if m.From-m.To == 7 || m.From-m.To == 9 {
+			newEnPassantTarget = m.To() + 8
+		} else if m.From()-m.To() == 7 || m.From()-m.To() == 9 {
 			// The pawn has moved diagonally onto an empty square -- this must be an en passant capture.
 			p.setSquare(p.EnPassant+8, Empty)
 		}
 	}
 
 	p.EnPassant = newEnPassantTarget
-	p.setSquare(m.From, Empty)
+	p.setSquare(m.From(), Empty)
 
-	if m.Promotion == None {
-		p.setSquare(m.To, movingPiece)
+	if m.Promotion() == None {
+		p.setSquare(m.To(), movingPiece)
 	} else {
-		p.setSquare(m.To, m.Promotion.OfColor(p.SideToMove))
+		p.setSquare(m.To(), m.Promotion().OfColor(p.SideToMove))
 	}
 
-	// TODO: this whole thing of inverting the side to move and then checking if the original side to move is okay seems a little convoluted
-	// is there a better way?
 	p.SideToMove = p.SideToMove.Invert()
 
 	if p.KingInCheck(p.SideToMove.Invert()) {
@@ -426,7 +425,7 @@ func (p *Position) MakeMove(m Move) bool {
 	}
 
 	// If there has been no capture and it's not a pawn move, then we need to increment the halfmove clock.
-	if movingPiece != WhitePawn && movingPiece != BlackPawn && p.Squares[m.To] != Empty {
+	if movingPiece != WhitePawn && movingPiece != BlackPawn && p.Squares[m.To()] != Empty {
 		p.HalfmoveClock += 1
 	} else {
 		p.HalfmoveClock = 0
@@ -437,29 +436,29 @@ func (p *Position) MakeMove(m Move) bool {
 
 // UndoMove undoes the last move.
 func (p *Position) UndoMove(m Move) {
-	p.EnPassant = m.PriorEnPassantTarget
-	p.Castling = m.PriorCastling
+	p.EnPassant = m.PriorEnPassantTarget()
+	p.Castling = m.PriorCastling()
 
-	p.setSquare(m.To, m.Captured)
-	p.setSquare(m.From, m.Moved)
+	p.setSquare(m.To(), m.Captured())
+	p.setSquare(m.From(), m.Moved())
 
-	if m.Moved.Colorless() == Pawn {
-		if m.To == p.EnPassant {
+	if m.Moved().Colorless() == Pawn {
+		if m.To() == p.EnPassant {
 			// This was an en passant move, so we need to undo setting m.To to the captured piece above and instead place
 			// the pawns properly.
-			p.setSquare(m.To, Empty)
+			p.setSquare(m.To(), Empty)
 
-			switch int(m.To) - int(m.From) {
-			case 7, 9: // I think this code disagrees with the source of GoBit, if there's a bug related to undoing moves it might be here.
-				p.setSquare(m.To-8, BlackPawn)
+			switch int(m.To()) - int(m.From()) {
+			case 7, 9:
+				p.setSquare(m.To()-8, BlackPawn)
 			case -7, -9:
-				p.setSquare(m.To+8, WhitePawn)
+				p.setSquare(m.To()+8, WhitePawn)
 			}
 		}
-	} else if m.Moved.Colorless() == King {
-		sideMoving := m.Moved.Color()
+	} else if m.Moved().Colorless() == King {
+		sideMoving := m.Moved().Color()
 
-		switch int(m.To) - int(m.From) {
+		switch int(m.To()) - int(m.From()) {
 		case 2: // Short castling for white, long castling for black
 			if sideMoving == White {
 				p.setSquare(SquareH1, WhiteRook)
@@ -492,14 +491,13 @@ func (p *Position) UndoMove(m Move) {
 }
 
 // KingInCheck returns true if the given side to move has their king in check.
-// TODO: actually make this work
 func (p *Position) KingInCheck(side Color) bool {
 	return p.IsAttacked(p.KingLocation[side], side.Invert())
 }
 
 // HasEnPassant returns true if the current player has a valid en passant move.
 func (p *Position) HasEnPassant() bool {
-	return p.EnPassant != 255
+	return p.EnPassant != NoEnPassant
 }
 
 // IsEmpty returns true if the specified square is empty.
@@ -508,25 +506,23 @@ func (p *Position) IsEmpty(square uint8) bool {
 }
 
 // IsValid returns true if the specified square is within the confines of the board.
-func (p *Position) IsValid(square uint8) bool {
+func IsValid(square uint8) bool {
 	return square <= 64
 }
 
 // OnRank returns true if the specified square is on the given rank.
-// TODO: write tests for seeing if a particular square is on a given rank or file
-func (p *Position) OnRank(square uint8, rank uint8) bool {
+func OnRank(square uint8, rank uint8) bool {
 	rank -= 1
 	return square >= 8*rank && square <= 8*rank+7
 }
 
 // OnFileA returns true if the specified square is on the A-file.
-func (p *Position) OnFileA(square uint8) bool {
+func OnFileA(square uint8) bool {
 	return square%8 == 0
 }
 
 // OnFileH returns true if the specified square is on the H-file.
-// TODO: why is this stuff a method on the struct?
-func (p *Position) OnFileH(square uint8) bool {
+func OnFileH(square uint8) bool {
 	return square%8 == 7
 }
 
@@ -547,18 +543,18 @@ func (p *Position) IsAttacked(square uint8, color Color) bool {
 	}
 
 	// Pawn attacks
-	if !p.OnFileA(square) {
-		if color == Black && !p.OnRank(square, 8) && p.Squares[square+7] == BlackPawn {
+	if !OnFileA(square) {
+		if color == Black && !OnRank(square, 8) && p.Squares[square+7] == BlackPawn {
 			return true
-		} else if color == White && !p.OnRank(square, 1) && p.Squares[square-9] == WhitePawn {
+		} else if color == White && !OnRank(square, 1) && p.Squares[square-9] == WhitePawn {
 			return true
 		}
 	}
 
-	if !p.OnFileH(square) {
-		if color == Black && !p.OnRank(square, 8) && p.Squares[square+9] == BlackPawn {
+	if !OnFileH(square) {
+		if color == Black && !OnRank(square, 8) && p.Squares[square+9] == BlackPawn {
 			return true
-		} else if color == White && !p.OnRank(square, 1) && p.Squares[square-7] == WhitePawn {
+		} else if color == White && !OnRank(square, 1) && p.Squares[square-7] == WhitePawn {
 			return true
 		}
 	}

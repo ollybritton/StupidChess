@@ -97,3 +97,4 @@ logs/
 profiles/
 stupidchess
 .vscode/*
+.vscode/settings.json
