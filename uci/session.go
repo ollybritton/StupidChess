@@ -295,10 +295,12 @@ func (s *Session) handleCommandGo(arguments []string) error {
 	}
 
 	position := s.positions[len(s.positions)-1]
-	moves := position.MovesLegal()
-	move := moves.AsSlice()[rand.Intn(moves.Length())]
+	bestMove, err := s.engine.Search(position, options)
+	if err != nil {
+		return fmt.Errorf("got an error searching for a move, %s", err)
+	}
 
-	fmt.Println("bestmove", move)
+	fmt.Println("bestmove", bestMove.String())
 
 	return nil
 }
