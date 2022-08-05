@@ -191,6 +191,17 @@ func (l *MoveList) AsSlice() []Move {
 	return l.moves
 }
 
+// Copy returns a copied version of the move list.
+func (l *MoveList) Copy() *MoveList {
+	newMoves := []Move{}
+
+	for _, move := range l.moves {
+		newMoves = append(newMoves, move)
+	}
+
+	return &MoveList{newMoves}
+}
+
 // Length returns the number of moves in the move list.
 func (l *MoveList) Length() int {
 	return len(l.moves)

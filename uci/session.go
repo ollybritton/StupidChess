@@ -307,6 +307,11 @@ func (s *Session) handleCommandGo(arguments []string) error {
 
 func (s *Session) handleCommandNewGame(arguments []string) error {
 	// TODO: implement special logic around ucinewgame command
+	err := s.engine.NewGame()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

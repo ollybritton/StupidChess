@@ -6,6 +6,7 @@ type Engine interface {
 	Name() string
 	Author() string
 
+	NewGame() error
 	Prepare() error
 	Search(*position.Position, SearchOptions) (position.Move, error)
 }
