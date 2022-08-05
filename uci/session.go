@@ -95,6 +95,10 @@ func (s *Session) handleCommandUci(arguments []string) error {
 
 	// TODO: implement options being printed out
 
+	seed := time.Now().Unix()
+	fmt.Println("info string rng seed", seed)
+	rand.Seed(time.Now().Unix())
+
 	fmt.Println("uciok")
 	return nil
 }
@@ -104,10 +108,6 @@ func (s *Session) handleCommandIsReady(arguments []string) error {
 	if err != nil {
 		return err
 	}
-
-	seed := time.Now().Unix()
-	fmt.Println("info string rng seed", seed)
-	rand.Seed(time.Now().Unix())
 
 	fmt.Println("readyok")
 	return nil
