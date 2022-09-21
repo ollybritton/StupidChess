@@ -2,19 +2,22 @@ package position
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
 // The binary format used for moves is taken from the GoBit engine:
 // https://github.com/carokanns/GoBit
 const (
-	maskFrom      = 0x0000003f // 0000 0000  0000 0000  0000 0000  0011 1111
-	maskTo        = 0x00000fd0 // 0000 0000  0000 0000  0000 1111  1100 0000
-	maskMoved     = 0x0000f000 // 0000 0000  0000 0000  1111 0000  0000 0000
-	maskCaptured  = 0x000f0000 // 0000 0000  0000 1111  0000 0000  0000 0000
-	maskPromotion = 0x00f00000 // 0000 0000  1111 0000  0000 0000  0000 0000
-	maskEnPassant = 0x0f000000 // 0000 1111  0000 0000  0000 0000  0000 0000
-	maskCastling  = 0xf0000000 // 1111 0000  0000 0000  0000 0000  0000 0000
+	maskFrom      = 0x00000000_0000003f // 0000 0000  0000 0000  0000 0000  0011 1111
+	maskTo        = 0x00000000_00000fd0 // 0000 0000  0000 0000  0000 1111  1100 0000
+	maskMoved     = 0x00000000_0000f000 // 0000 0000  0000 0000  1111 0000  0000 0000
+	maskCaptured  = 0x00000000_000f0000 // 0000 0000  0000 1111  0000 0000  0000 0000
+	maskPromotion = 0x00000000_00f00000 // 0000 0000  1111 0000  0000 0000  0000 0000
+	maskEnPassant = 0x00000000_0f000000 // 0000 1111  0000 0000  0000 0000  0000 0000
+	maskCastling  = 0x00000000_f0000000 // 1111 0000  0000 0000  0000 0000  0000 0000
+
+	maskEval = 0xffff0000_00000000
 
 	shiftFrom      = 0
 	shiftTo        = 6
@@ -23,6 +26,7 @@ const (
 	shiftPromotion = 20 // 6 + 6 + 4 + 4
 	shiftEnPassant = 24 // 6 + 6 + 4 + 4 + 4
 	shiftCastling  = 28 // 6 + 6 + 4 + 4 + 4 + 4
+	shiftEval      = 48 // 6 + 6 + 4 + 4 + 4 + 4 + 16
 )
 
 // Move represents a chess move.
@@ -48,6 +52,12 @@ func NewMove(from, to uint8,
 			(uint64(promotion) << shiftPromotion) |
 			(uint64(enPassantFile) << shiftEnPassant) |
 			(uint64(priorCastling) << shiftCastling))
+}
+
+// SetEval sets the score for a move.
+func (m *Move) SetEval(score int16) {
+	(*m) &= ^Move(maskEval)
+	(*m) |= Move(uint16(score)) << shiftEval
 }
 
 // ParseMove parses a UCI-style long algebraic notation move into a Move.
@@ -110,6 +120,11 @@ func (m Move) Promotion() Piece {
 // PriorCastling returns the castling status prior to the move being completed.
 func (m Move) PriorCastling() CastlingAvailability {
 	return CastlingAvailability((m & maskCastling) >> shiftCastling)
+}
+
+// Eval returns the score of a move as an integer.
+func (m Move) Eval() int16 {
+	return int16((uint64(m) & maskEval) >> shiftEval)
 }
 
 // PriorEnPassantTarget returns the en passant target for the move.
@@ -190,9 +205,27 @@ func (l *MoveList) AsSlice() []Move {
 	return l.moves
 }
 
-// Length returns the number of moves in the move list.
-func (l *MoveList) Length() int {
+// Len returns the number of moves in the move list.
+func (l *MoveList) Len() int {
 	return len(l.moves)
+}
+
+// Less returns whether two different moves have a larger or smaller evaluation than the other.
+// This is used to implement sort.Interface so that moves can be sorted by their evaluation.
+func (l *MoveList) Less(i, j int) bool {
+	return l.moves[i].Eval() < l.moves[j].Eval()
+}
+
+// Swap swaps the moves with indicies i and j.
+// This is used to implement sort.Interface so that moves can be sorted by their evaluaiton.
+func (l *MoveList) Swap(i, j int) {
+	l.moves[i], l.moves[j] = l.moves[j], l.moves[i]
+}
+
+// Sort sorts the moves in the move list by their evaluation.
+// It is a shorthand for sort.Sort(moveList).
+func (l *MoveList) Sort() {
+	sort.Sort(l)
 }
 
 // Filter removes moves in the move list according to a function that evaluates a move and says whether it is allowed in the

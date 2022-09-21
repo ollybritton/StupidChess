@@ -44,3 +44,18 @@ func TestParseMoveInvalid(t *testing.T) {
 		assert.Error(t, err, "expected invalid move for %s", test)
 	}
 }
+
+// TestMoveEval tests that setting and retrieving a move's score works as intended.
+func TestMoveEval(t *testing.T) {
+	move, err := ParseMove("d2d4")
+	assert.NoError(t, err)
+
+	move.SetEval(int16(-100))
+	assert.Equal(t, int16(-100), move.Eval())
+
+	move.SetEval(int16(100))
+	assert.Equal(t, int16(100), move.Eval())
+
+	assert.Equal(t, move.From(), SquareD2)
+	assert.Equal(t, move.To(), SquareD4)
+}
