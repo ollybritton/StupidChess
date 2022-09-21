@@ -37,8 +37,8 @@ func NewMove(from, to uint8,
 	moved, captured ColoredPiece,
 	promotion Piece,
 	priorCastling CastlingAvailability,
-	priorEnPassant uint8) Move {
-
+	priorEnPassant uint8,
+) Move {
 	enPassantFile := uint8(0)
 	if priorEnPassant != NoEnPassant {
 		enPassantFile = (priorEnPassant % 8) + 1
@@ -192,7 +192,8 @@ func (l *MoveList) AppendFromBitboard(piece ColoredPiece,
 	bitboard Bitboard,
 	squares []ColoredPiece,
 	castling CastlingAvailability,
-	enPassantTarget uint8) {
+	enPassantTarget uint8,
+) {
 	for to := bitboard.FirstOn(); to <= bitboard.LastOn() && to != 64; to++ {
 		if bitboard.IsOn(to) {
 			l.moves = append(l.moves, (NewMove(fromFunc(to), to, piece, squares[to], None, castling, enPassantTarget)))
@@ -208,6 +209,12 @@ func (l *MoveList) AsSlice() []Move {
 // Len returns the number of moves in the move list.
 func (l *MoveList) Len() int {
 	return len(l.moves)
+}
+
+// Copy returns a copied version of the move list.
+func (l *MoveList) Copy() *MoveList {
+	newMoves := append([]Move{}, l.moves...)
+	return &MoveList{newMoves}
 }
 
 // Less returns whether two different moves have a larger or smaller evaluation than the other.
@@ -231,9 +238,13 @@ func (l *MoveList) Sort() {
 // Filter removes moves in the move list according to a function that evaluates a move and says whether it is allowed in the
 // list or not.
 func (l *MoveList) Filter(allowedFunc func(Move) bool) {
-	for i, move := range l.moves {
-		if !allowedFunc(move) {
-			l.moves = append(l.moves[:i], l.moves[i+1:]...)
+	out := make([]Move, 0, len(l.moves))
+
+	for _, move := range l.moves {
+		if allowedFunc(move) {
+			out = append(out, move)
 		}
 	}
+
+	l.moves = out
 }

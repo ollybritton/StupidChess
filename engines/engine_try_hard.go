@@ -17,3 +17,7 @@ func (e *EngineTryHard) Author() string {
 func (e *EngineTryHard) Prepare() error {
 	return nil
 }
+
+func (e *EngineTryHard) NewGame() error {
+	return nil
+}
