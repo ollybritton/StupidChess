@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/search"
 )
 
 type EngineSprinter struct {
@@ -31,7 +32,7 @@ func (e *EngineSprinter) Prepare() error {
 	return nil
 }
 
-func (e *EngineSprinter) Search(pos *position.Position, searchOptions SearchOptions) (position.Move, error) {
+func (e *EngineSprinter) Search(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
 	legalMoves := pos.MovesLegal()
 
 	newMoves := pos.MovesLegal().Copy()

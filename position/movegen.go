@@ -47,6 +47,24 @@ func (p *Position) MovesLegal() *MoveList {
 	return moves
 }
 
+// MovesLegalWithEvaluation generates all legal moves in a position and sorts them using the given evaluation function.
+func (p *Position) MovesLegalWithEvaluation(evaluator Evaluator) *MoveList {
+	moves := p.MovesPseudolegal()
+	moves.Filter(func(move Move) bool {
+		if p.MakeMove(move) {
+			move.SetEval(evaluator(p))
+			p.UndoMove(move)
+
+			return true
+		}
+
+		return false
+	})
+	moves.Sort()
+
+	return moves
+}
+
 // MovesPseudolegal generates all pseudolegal moves in a position. These are moves that follow all the rules of chess
 // with the exception that the king might be in check at the end.
 func (p *Position) MovesPseudolegal() *MoveList {
@@ -642,25 +660,25 @@ func initialiseKnightMoves() [64]Bitboard {
 //
 // For example, for the square B4:
 //
-//   0 0 0 0 0 0 0 0
-//   0 1 0 0 0 0 0 0
-//   0 1 0 0 0 0 0 0
-//   0 1 0 0 0 0 0 0
-//   0 0 1 1 1 1 1 0
-//   0 1 0 0 0 0 0 0
-//   0 1 0 0 0 0 0 0
-//   0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0
+//	0 1 0 0 0 0 0 0
+//	0 1 0 0 0 0 0 0
+//	0 1 0 0 0 0 0 0
+//	0 0 1 1 1 1 1 0
+//	0 1 0 0 0 0 0 0
+//	0 1 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0
 //
 // Or the square D5:
 //
-//   0 0 0 0 0 0 0 0
-//   0 0 0 1 0 0 0 0
-//   0 0 0 1 0 0 0 0
-//   0 1 1 0 1 1 1 0
-//   0 0 0 1 0 0 0 0
-//   0 0 0 1 0 0 0 0
-//   0 0 0 1 0 0 0 0
-//   0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0
+//	0 0 0 1 0 0 0 0
+//	0 0 0 1 0 0 0 0
+//	0 1 1 0 1 1 1 0
+//	0 0 0 1 0 0 0 0
+//	0 0 0 1 0 0 0 0
+//	0 0 0 1 0 0 0 0
+//	0 0 0 0 0 0 0 0
 //
 // The bits on the perimeter don't matter because regardless of what's there, it doesn't have any effect on the squares the
 // bishop can attack. If there is no piece there, then the attack ends there because the end of the board is reached, and
@@ -798,25 +816,25 @@ func initialiseRookMoves() [64][4096]Bitboard {
 //
 // For example, for the square B4:
 //
-//   0 0 0 0 0 0 0 0
-//   0 0 0 0 1 0 0 0
-//   0 0 0 1 0 0 0 0
-//   0 0 1 0 0 0 0 0
-//   0 0 0 0 0 0 0 0
-//   0 0 1 0 0 0 0 0
-//   0 0 0 1 0 0 0 0
-//   0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0
+//	0 0 0 0 1 0 0 0
+//	0 0 0 1 0 0 0 0
+//	0 0 1 0 0 0 0 0
+//	0 0 0 0 0 0 0 0
+//	0 0 1 0 0 0 0 0
+//	0 0 0 1 0 0 0 0
+//	0 0 0 0 0 0 0 0
 //
 // Or the square D5:
 //
-//   0 0 0 0 0 0 0 0
-//   0 1 0 0 0 1 0 0
-//   0 0 1 0 1 0 0 0
-//   0 0 0 0 0 0 0 0
-//   0 0 1 0 1 0 0 0
-//   0 1 0 0 0 1 0 0
-//   0 0 0 0 0 0 1 0
-//   0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0
+//	0 1 0 0 0 1 0 0
+//	0 0 1 0 1 0 0 0
+//	0 0 0 0 0 0 0 0
+//	0 0 1 0 1 0 0 0
+//	0 1 0 0 0 1 0 0
+//	0 0 0 0 0 0 1 0
+//	0 0 0 0 0 0 0 0
 //
 // The bits on the perimeter don't matter because regardless of what's there, it doesn't have any effect on the squares the
 // bishop can attack. If there is no piece there, then the attack ends there because the end of the board is reached, and
@@ -1019,30 +1037,29 @@ func (p *Position) Perft(depth uint) uint {
 // that position.
 // For example, in the starting position, Divide(5) outputs
 //
-//   a2a3: 181046
-//   b2b3: 215255
-//   c2c3: 222861
-//   d2d3: 328511
-//   e2e3: 402988
-//   f2f3: 178889
-//   g2g3: 217210
-//   h2h3: 181044
-//   a2a4: 217832
-//   b2b4: 216145
-//   c2c4: 240082
-//   d2d4: 361790
-//   e2e4: 405385
-//   f2f4: 198473
-//   g2g4: 214048
-//   h2h4: 218829
-//   b1a3: 198572
-//   b1c3: 234656
-//   g1f3: 233491
-//   g1h3: 198502
+//	a2a3: 181046
+//	b2b3: 215255
+//	c2c3: 222861
+//	d2d3: 328511
+//	e2e3: 402988
+//	f2f3: 178889
+//	g2g3: 217210
+//	h2h3: 181044
+//	a2a4: 217832
+//	b2b4: 216145
+//	c2c4: 240082
+//	d2d4: 361790
+//	e2e4: 405385
+//	f2f4: 198473
+//	g2g4: 214048
+//	h2h4: 218829
+//	b1a3: 198572
+//	b1c3: 234656
+//	g1f3: 233491
+//	g1h3: 198502
 //
-//   total: 4865609
-//   speed: 1189.81kn/s
-//
+//	total: 4865609
+//	speed: 1189.81kn/s
 func (p *Position) Divide(depth uint) uint {
 	pseudolegalMoves := p.MovesPseudolegal()
 	nodes := uint(0)
