@@ -1,4 +1,4 @@
-package engines
+package search
 
 import (
 	"math"

@@ -1,6 +1,9 @@
 package engines
 
-import "github.com/ollybritton/StupidChess/position"
+import (
+	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/search"
+)
 
 type Engine interface {
 	Name() string
@@ -8,5 +11,5 @@ type Engine interface {
 
 	NewGame() error
 	Prepare() error
-	Search(*position.Position, SearchOptions) (position.Move, error)
+	Search(*position.Position, search.SearchOptions) (position.Move, error)
 }

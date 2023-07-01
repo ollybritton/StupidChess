@@ -1,6 +1,5 @@
 /*
 Copyright © 2022 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
@@ -29,7 +28,7 @@ var uciCmd = &cobra.Command{
 
 		fmt.Println("stupidchess ~", engineName)
 
-		uci.Listen(os.Stdin, engine)
+		uci.Listen(os.Stdin, engines.NewEngineTryHard())
 	},
 }
 

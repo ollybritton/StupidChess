@@ -9,6 +9,7 @@ import (
 
 	"github.com/ollybritton/StupidChess/engines"
 	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/search"
 )
 
 type Session struct {
@@ -115,9 +116,12 @@ func (s *Session) handleCommandIsReady(arguments []string) error {
 
 // handleCommandPosition is called when the GUI gives the "position" command.
 // The position command in the UCI protocol has the following format:
-//   position fen <fen string>|startpos moves <long algebraic notation moves>
+//
+//	position fen <fen string>|startpos moves <long algebraic notation moves>
+//
 // Long algebraic notation moves look like so:
-//   e2e4, e7e5, e1g1 (white short castling), e7e8q (for promotion)
+//
+//	e2e4, e7e5, e1g1 (white short castling), e7e8q (for promotion)
 func (s *Session) handleCommandPosition(arguments []string) error {
 	fen := ""
 	var moves []string
@@ -169,7 +173,7 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 }
 
 func (s *Session) handleCommandGo(arguments []string) error {
-	options := engines.NewDeafultOptions()
+	options := search.NewDeafultOptions()
 
 	var i int
 
