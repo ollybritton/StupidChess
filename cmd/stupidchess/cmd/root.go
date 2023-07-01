@@ -58,7 +58,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.stupidchess.yaml)")
-	rootCmd.PersistentFlags().StringP("engine", "e", "try-hard", "engine to use")
+	rootCmd.PersistentFlags().StringP("engine", "e", "suicideking", "engine to use")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.

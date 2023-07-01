@@ -20,9 +20,16 @@ var uciCmd = &cobra.Command{
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
 		engineName := getEngine(cmd)
+		engine, ok := engines.EngineInfo[engineName]
+
+		if !ok {
+			fmt.Println("engine", engineName, "not found")
+			os.Exit(1)
+		}
+
 		fmt.Println("stupidchess ~", engineName)
 
-		uci.Listen(os.Stdin, engines.NewEngineSprinter())
+		uci.Listen(os.Stdin, engine)
 	},
 }
 

@@ -15,7 +15,7 @@ func NewEngineSprinter() *EngineSprinter {
 }
 
 func (e *EngineSprinter) Name() string {
-	return "try-hard"
+	return "sprinter"
 }
 
 func (e *EngineSprinter) Author() string {
@@ -39,8 +39,10 @@ func (e *EngineSprinter) Search(pos *position.Position, searchOptions SearchOpti
 		return m.Moved().Colorless() != e.prevPiece
 	})
 
+	// Distance is calculated using the "maximum metric" (https://chris3606.github.io/GoRogue/articles/grid_components/measuring-distance.html#chebyshev-distance).
+
 	var bestMove position.Move
-	var bestSquaredDist float64
+	var bestDist float64 = -1
 
 	for _, move := range newMoves.AsSlice() {
 		from := move.From()
@@ -52,11 +54,11 @@ func (e *EngineSprinter) Search(pos *position.Position, searchOptions SearchOpti
 		toRank := float64(to / 8)
 		toFile := float64(to % 8)
 
-		squaredDist := math.Pow(fromRank-toRank, 2) + math.Pow(fromFile-toFile, 2)
+		dist := math.Max(fromRank-toRank, fromFile-toFile)
 
-		if squaredDist > bestSquaredDist {
+		if dist > bestDist {
 			bestMove = move
-			bestSquaredDist = squaredDist
+			bestDist = dist
 		}
 	}
 
@@ -75,11 +77,11 @@ func (e *EngineSprinter) Search(pos *position.Position, searchOptions SearchOpti
 		toRank := float64(to / 8)
 		toFile := float64(to % 8)
 
-		squaredDist := math.Pow(fromRank-toRank, 2) + math.Pow(fromFile-toFile, 2)
+		dist := math.Max(fromRank-toRank, fromFile-toFile)
 
-		if squaredDist > bestSquaredDist {
+		if dist > bestDist {
 			bestMove = move
-			bestSquaredDist = squaredDist
+			bestDist = dist
 		}
 	}
 
