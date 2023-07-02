@@ -8,29 +8,17 @@ import (
 	"github.com/ollybritton/StupidChess/search"
 )
 
-type EngineSuicideKing struct{}
-
-func NewEngineSuicideKing() *EngineSuicideKing {
-	return &EngineSuicideKing{}
+func NewEngineSuicideKing() *SimpleEngine {
+	return NewSimpleEngine(
+		"suicide-king",
+		"Olly Britton",
+		func(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
+			return moveMinimiseKingDistance(pos)
+		},
+	)
 }
 
-func (e *EngineSuicideKing) Name() string {
-	return "suicide-king"
-}
-
-func (e *EngineSuicideKing) Author() string {
-	return "Olly Britton"
-}
-
-func (e *EngineSuicideKing) NewGame() error {
-	return nil
-}
-
-func (e *EngineSuicideKing) Prepare() error {
-	return nil
-}
-
-func (e *EngineSuicideKing) Search(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
+func moveMinimiseKingDistance(pos *position.Position) (position.Move, error) {
 	legalMoves := pos.MovesLegal().AsSlice()
 
 	var bestMoves []position.Move

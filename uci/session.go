@@ -47,6 +47,8 @@ func (s *Session) Handle(commandLine string) error {
 		handler = s.handleCommandPosition
 	case "go":
 		handler = s.handleCommandGo
+	case "stop":
+		handler = s.handleCommandStop
 	case "ucinewgame":
 		handler = s.handleCommandNewGame
 
@@ -249,7 +251,7 @@ func (s *Session) handleCommandGo(arguments []string) error {
 				return fmt.Errorf("expecting number after 'depth' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
 
-			options.MovesToGo = uint(depth)
+			options.Depth = uint(depth)
 
 		case "nodes":
 			if i == len(arguments)-1 {
@@ -302,12 +304,16 @@ func (s *Session) handleCommandGo(arguments []string) error {
 	}
 
 	position := s.positions[len(s.positions)-1]
-	bestMove, err := s.engine.Search(position, options)
+	err := s.engine.Go(position, options)
 	if err != nil {
 		return fmt.Errorf("got an error searching for a move, %s", err)
 	}
 
-	fmt.Println("bestmove", bestMove.String())
+	return nil
+}
+
+func (s *Session) handleCommandStop(arguments []string) error {
+	s.engine.Stop()
 
 	return nil
 }
@@ -564,7 +570,7 @@ func (s *Session) handleCommandEvaluate(arguments []string) error {
 
 	positionsLength := len(s.positions)
 	if positionsLength == 0 {
-		return fmt.Errorf("no position to analyse")
+		return fmt.Errorf("no position to evaluate")
 	}
 
 	if evaluator == nil {

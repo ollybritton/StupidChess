@@ -11,5 +11,6 @@ type Engine interface {
 
 	NewGame() error
 	Prepare() error
-	Search(*position.Position, search.SearchOptions) (position.Move, error)
+	Go(*position.Position, search.SearchOptions) error
+	Stop()
 }

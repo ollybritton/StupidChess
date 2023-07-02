@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -32,7 +33,7 @@ func (e *EngineSprinter) Prepare() error {
 	return nil
 }
 
-func (e *EngineSprinter) Search(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
+func (e *EngineSprinter) Go(pos *position.Position, searchOptions search.SearchOptions) error {
 	legalMoves := pos.MovesLegal()
 
 	newMoves := pos.MovesLegal().Copy()
@@ -65,7 +66,9 @@ func (e *EngineSprinter) Search(pos *position.Position, searchOptions search.Sea
 
 	if bestMove != position.Move(0) {
 		e.prevPiece = bestMove.Moved().Colorless()
-		return bestMove, nil
+
+		fmt.Println("bestmove", bestMove.String())
+		return nil
 	}
 
 	for _, move := range legalMoves.AsSlice() {
@@ -87,5 +90,10 @@ func (e *EngineSprinter) Search(pos *position.Position, searchOptions search.Sea
 	}
 
 	e.prevPiece = bestMove.Moved().Colorless()
-	return bestMove, nil
+
+	fmt.Println("bestmove", bestMove.String())
+
+	return nil
 }
+
+func (e *EngineSprinter) Stop() {}

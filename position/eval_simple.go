@@ -6,7 +6,7 @@ var simpleEvalTable = map[Piece]int16{
 	Bishop: 4,
 	Rook:   5,
 	Queen:  9,
-	King:   10_000,
+	King:   1_000,
 }
 
 // EvalSimple evaluates the position using a simple material count.

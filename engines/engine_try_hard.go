@@ -1,14 +1,23 @@
 package engines
 
 import (
+	"fmt"
+
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
 )
 
-type EngineTryHard struct{}
+type EngineTryHard struct {
+	searcher search.Searcher
+}
 
 func NewEngineTryHard() *EngineTryHard {
-	return &EngineTryHard{}
+	requests := make(chan search.Request)
+	responses := make(chan string)
+
+	return &EngineTryHard{
+		searcher: search.NewAlphaBetaSearch(requests, responses),
+	}
 }
 
 func (e *EngineTryHard) Name() string {
@@ -20,6 +29,14 @@ func (e *EngineTryHard) Author() string {
 }
 
 func (e *EngineTryHard) Prepare() error {
+	go func() {
+		for msg := range e.searcher.Responses() {
+			fmt.Println(msg)
+		}
+	}()
+
+	go e.searcher.Listen()
+
 	return nil
 }
 
@@ -27,14 +44,12 @@ func (e *EngineTryHard) NewGame() error {
 	return nil
 }
 
-func (e *EngineTryHard) Search(pos *position.Position, options search.SearchOptions) (position.Move, error) {
-	legalMoves := pos.MovesLegalWithEvaluation(position.EvalSimple)
+func (e *EngineTryHard) Go(pos *position.Position, options search.SearchOptions) error {
+	e.searcher.Requests() <- search.NewRequest(pos, options)
 
-	slice := legalMoves.AsSlice()
+	return nil
+}
 
-	if pos.SideToMove == position.White {
-		return slice[len(slice)-1], nil
-	} else {
-		return slice[0], nil
-	}
+func (e *EngineTryHard) Stop() {
+	e.searcher.Stop()
 }

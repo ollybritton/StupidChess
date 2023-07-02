@@ -23,6 +23,8 @@ type SearchOptions struct {
 	WhiteIncrement     float64 // Increment for white in seconds.
 	BlackIncrement     float64 // Increment for black in seconds.
 	MovesToGo          uint    // Number of moves until the next time control.
+
+	Stop bool
 }
 
 // NewDefaultOptions returns the default search options for an engine.
@@ -30,7 +32,7 @@ func NewDeafultOptions() SearchOptions {
 	return SearchOptions{
 		Infinite:           false,
 		SearchMoves:        []position.Move{},
-		Depth:              math.MaxUint,
+		Depth:              4, // math.MaxUint, // TODO: reevaluate this
 		Nodes:              math.MaxUint,
 		Mate:               math.MaxUint,
 		MoveTime:           time.Duration(math.MaxInt64),
