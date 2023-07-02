@@ -5,6 +5,7 @@ import (
 	"math/rand"
 
 	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/search"
 )
 
 type EngineSuicideKing struct{}
@@ -29,7 +30,7 @@ func (e *EngineSuicideKing) Prepare() error {
 	return nil
 }
 
-func (e *EngineSuicideKing) Search(pos *position.Position, searchOptions SearchOptions) (position.Move, error) {
+func (e *EngineSuicideKing) Search(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
 	legalMoves := pos.MovesLegal().AsSlice()
 
 	var bestMoves []position.Move

@@ -28,7 +28,7 @@ var uciCmd = &cobra.Command{
 
 		fmt.Println("stupidchess ~", engineName)
 
-		uci.Listen(os.Stdin, engines.NewEngineTryHard())
+		uci.Listen(os.Stdin, engine)
 	},
 }
 

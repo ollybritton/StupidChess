@@ -81,6 +81,9 @@ func (s *Session) Handle(commandLine string) error {
 	case "_um", "_undomove":
 		handler = s.handleCommandUndoMove
 
+	case "_ev", "_evaluate":
+		handler = s.handleCommandEvaluate
+
 	// Handle unknown commands
 	default:
 		fmt.Printf("info string don't understand %s\n", commandName)
@@ -547,6 +550,28 @@ func (s *Session) handleCommandUndoMove(arguments []string) error {
 
 	move := s.moves[movesLength-1]
 	s.positions[positionsLength-1].UndoMove(move)
+
+	return nil
+}
+
+func (s *Session) handleCommandEvaluate(arguments []string) error {
+	if len(arguments) == 0 {
+		return fmt.Errorf("expecting evaluator name")
+	}
+
+	name := arguments[0]
+	evaluator := position.GetEvaluator(name)
+
+	positionsLength := len(s.positions)
+	if positionsLength == 0 {
+		return fmt.Errorf("no position to analyse")
+	}
+
+	if evaluator == nil {
+		return fmt.Errorf("no such evaluator %q", name)
+	}
+
+	fmt.Printf("%d\n", evaluator(s.positions[positionsLength-1]))
 
 	return nil
 }

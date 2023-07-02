@@ -29,7 +29,12 @@ func (e *EngineTryHard) NewGame() error {
 
 func (e *EngineTryHard) Search(pos *position.Position, options search.SearchOptions) (position.Move, error) {
 	legalMoves := pos.MovesLegalWithEvaluation(position.EvalSimple)
-	legalMoves.Sort()
 
-	return legalMoves.AsSlice()[0], nil
+	slice := legalMoves.AsSlice()
+
+	if pos.SideToMove == position.White {
+		return slice[len(slice)-1], nil
+	} else {
+		return slice[0], nil
+	}
 }

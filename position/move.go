@@ -248,3 +248,19 @@ func (l *MoveList) Filter(allowedFunc func(Move) bool) {
 
 	l.moves = out
 }
+
+// FilterMap removes moves in the move list according to a function that evaluates a move and says whether it is allowed in the
+// list or not, and also returns a potentially modified move if it is allowed in the list.
+func (l *MoveList) FilterMap(allowedFunc func(Move) (bool, Move)) {
+	out := make([]Move, 0, len(l.moves))
+
+	for _, move := range l.moves {
+		allowed, newMove := allowedFunc(move)
+		if allowed {
+			out = append(out, newMove)
+		}
+
+	}
+
+	l.moves = out
+}

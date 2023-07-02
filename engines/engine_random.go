@@ -4,6 +4,7 @@ import (
 	"math/rand"
 
 	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/search"
 )
 
 type EngineRandom struct{}
@@ -28,7 +29,7 @@ func (e *EngineRandom) Prepare() error {
 	return nil
 }
 
-func (e *EngineRandom) Search(pos *position.Position, searchOptions SearchOptions) (position.Move, error) {
+func (e *EngineRandom) Search(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
 	legalMoves := pos.MovesLegal().AsSlice()
 	return legalMoves[rand.Intn(len(legalMoves))], nil
 }

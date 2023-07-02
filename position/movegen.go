@@ -50,16 +50,17 @@ func (p *Position) MovesLegal() *MoveList {
 // MovesLegalWithEvaluation generates all legal moves in a position and sorts them using the given evaluation function.
 func (p *Position) MovesLegalWithEvaluation(evaluator Evaluator) *MoveList {
 	moves := p.MovesPseudolegal()
-	moves.Filter(func(move Move) bool {
+	moves.FilterMap(func(move Move) (bool, Move) {
 		if p.MakeMove(move) {
 			move.SetEval(evaluator(p))
 			p.UndoMove(move)
 
-			return true
+			return true, move
 		}
 
-		return false
+		return false, Move(0)
 	})
+
 	moves.Sort()
 
 	return moves
