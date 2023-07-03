@@ -68,7 +68,12 @@ func (s *AlphaBetaSearch) Listen() error {
 
 			pos.UndoMove(move)
 
-			move.SetEval(score)
+			if bestMove == position.Move(0) {
+				bestMove = move
+				bestScore = score
+			}
+
+			move.SetEval(position.ScoreFromPerspective(score, pos.SideToMove))
 
 			if score > bestScore {
 				bestScore = score
@@ -94,11 +99,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	s.nodeCount++
 
 	if depth <= 0 {
-		if pos.SideToMove == position.Black {
-			return -position.EvalSimple(pos) // TODO: make more customisable
-		} else {
-			return position.EvalSimple(pos)
-		}
+		return position.ScoreFromPerspective(position.EvalSimple(pos), pos.SideToMove) // TODO: make more customisable
 	}
 
 	pv.clear()
@@ -106,20 +107,30 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	legalMoves := pos.MovesLegal()
 	slice := legalMoves.AsSlice()
 
-	bestMove, bestScore := position.Move(0), int16(-10010)
+	bestMove, bestScore := position.Move(0), int16(-20001)
 	// BUG: There's issues around forced mates since there's no legal moves, and so the "bestMove" ends up being
 	// the null move. How to fix?
+	// TODO: doesn't understand draw by threefold repetition
 
 	var childPV pvList
 
 	for _, move := range slice {
+
 		childPV.clear()
 		pos.MakeMove(move)
 		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
 		pos.UndoMove(move)
 
+		if bestMove == position.Move(0) {
+			bestMove = move
+			bestScore = score
+		}
+
 		if score > bestScore {
 			bestScore = score
+			bestMove = move
+			_ = bestMove
+
 			pv.catenate(move, &childPV)
 
 			if score >= beta {
@@ -127,8 +138,6 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			}
 
 			if score > alpha {
-				bestMove = move
-				_ = bestMove
 				alpha = score
 			}
 		}
@@ -141,6 +150,17 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 
 		if s.stop {
 			return alpha
+		}
+
+		if legalMoves.Len() == 0 {
+			fmt.Println("no legal moves")
+			score = 0
+
+			if pos.KingInCheck(pos.SideToMove) {
+				score = -30000 + int16(ply) + 1
+			}
+
+			return score
 		}
 	}
 
