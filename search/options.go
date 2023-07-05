@@ -32,10 +32,10 @@ func NewDeafultOptions() SearchOptions {
 	return SearchOptions{
 		Infinite:           false,
 		SearchMoves:        []position.Move{},
-		Depth:              5, // math.MaxUint, // TODO: reevaluate this
+		Depth:              7, // math.MaxUint, // TODO: reevaluate this
 		Nodes:              math.MaxUint,
 		Mate:               math.MaxUint,
-		MoveTime:           time.Duration(math.MaxInt64),
+		MoveTime:           10 * time.Second, //time.Duration(math.MaxInt64),
 		WhiteTimeRemaining: math.MaxUint,
 		BlackTimeRemaining: math.MaxUint,
 		WhiteIncrement:     math.MaxFloat64,

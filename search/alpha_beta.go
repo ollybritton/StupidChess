@@ -15,6 +15,7 @@ type AlphaBetaSearch struct {
 	nextTime  time.Time
 	nodeCount int
 	stop      bool
+	options   SearchOptions
 }
 
 func NewAlphaBetaSearch(requests chan Request, responses chan string) *AlphaBetaSearch {
@@ -50,44 +51,40 @@ func (s *AlphaBetaSearch) Listen() error {
 		s.nextTime = time.Now()
 		s.nodeCount = 0
 		s.stop = request.options.Stop
+		s.options = request.options
 
-		alpha, beta := int16(-10000), int16(10000) // TODO: replace with more sensible defaults
-		bestMove, bestScore := position.Move(0), int16(-10001)
+		alpha, beta := position.MinEval, position.MaxEval
+		bestMove, bestScore := position.NoMove, position.NoEval
 		depth := request.options.Depth
 
 		legalMoves := pos.MovesLegal()
-
 		slice := legalMoves.AsSlice()
 
-		for _, move := range slice {
-			childPV.clear()
-			pos.MakeMove(move)
+		for depth := uint(1); depth <= request.options.Depth; depth++ {
+			for _, move := range slice {
+				childPV.clear()
+				pos.MakeMove(move)
 
-			score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
-			s.responses <- fmt.Sprintf("info currmove %s score %d", move.String(), score)
+				score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
+				s.responses <- fmt.Sprintf("info currmove %s score %d", move.String(), score)
 
-			pos.UndoMove(move)
+				pos.UndoMove(move)
 
-			if bestMove == position.Move(0) {
-				bestMove = move
-				bestScore = score
-			}
+				move.SetEval(position.ScoreFromPerspective(score, pos.SideToMove))
 
-			move.SetEval(position.ScoreFromPerspective(score, pos.SideToMove))
+				if score > bestScore {
+					bestScore = score
+					pv.clear()
+					pv.catenate(move, &childPV)
 
-			if score > bestScore {
-				bestScore = score
-				pv.clear()
-				pv.catenate(move, &childPV)
+					bestMove = move
+					alpha = score
 
-				bestMove = move
-				alpha = score
-
-				s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
+					s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
+				}
 			}
 		}
 
-		legalMoves.Sort()
 		s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
 		s.responses <- fmt.Sprintf("bestmove %s", bestMove.String())
 	}
@@ -107,7 +104,8 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	legalMoves := pos.MovesLegal()
 	slice := legalMoves.AsSlice()
 
-	bestMove, bestScore := position.Move(0), int16(-20001)
+	bestMove, bestScore := position.NoMove, position.MinEval
+
 	// BUG: There's issues around forced mates since there's no legal moves, and so the "bestMove" ends up being
 	// the null move. How to fix?
 	// TODO: doesn't understand draw by threefold repetition
@@ -115,16 +113,11 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	var childPV pvList
 
 	for _, move := range slice {
-
 		childPV.clear()
+
 		pos.MakeMove(move)
 		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
 		pos.UndoMove(move)
-
-		if bestMove == position.Move(0) {
-			bestMove = move
-			bestScore = score
-		}
 
 		if score > bestScore {
 			bestScore = score
@@ -132,14 +125,14 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			_ = bestMove
 
 			pv.catenate(move, &childPV)
+		}
 
-			if score >= beta {
-				return score
-			}
+		if score >= beta {
+			break
+		}
 
-			if score > alpha {
-				alpha = score
-			}
+		if score > alpha {
+			alpha = score
 		}
 
 		if time.Since(s.nextTime) >= time.Second {
@@ -148,20 +141,18 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			s.nextTime = time.Now()
 		}
 
-		if s.stop {
+		if s.stop || time.Since(s.startTime) > s.options.MoveTime {
 			return alpha
 		}
 
-		if legalMoves.Len() == 0 {
-			fmt.Println("no legal moves")
-			score = 0
+	}
 
-			if pos.KingInCheck(pos.SideToMove) {
-				score = -30000 + int16(ply) + 1
-			}
-
-			return score
+	if len(slice) == 0 {
+		if pos.KingInCheck(pos.SideToMove) {
+			return -30000 + int16(ply) + 1
 		}
+
+		return 0 // TODO: return contempt value instead?
 	}
 
 	return bestScore

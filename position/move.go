@@ -29,6 +29,10 @@ const (
 	shiftEval      = 48 // 6 + 6 + 4 + 4 + 4 + 4 + 16
 )
 
+const (
+	NoMove = Move(0)
+)
+
 // Move represents a chess move.
 type Move uint64
 

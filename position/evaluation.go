@@ -1,5 +1,12 @@
 package position
 
+const (
+	MaxEval  int16 = 30_000
+	MinEval  int16 = -MaxEval
+	MateEval int16 = MaxEval + 1
+	NoEval   int16 = MinEval - 1
+)
+
 // Evaluator decides the numerical value of a position.
 // An int16 is used so that evaluations can be packed into moves compactly.
 // TODO: Consider refactoring into seperate package
