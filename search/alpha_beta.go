@@ -60,28 +60,26 @@ func (s *AlphaBetaSearch) Listen() error {
 		legalMoves := pos.MovesLegal()
 		slice := legalMoves.AsSlice()
 
-		for depth := uint(1); depth <= request.options.Depth; depth++ {
-			for _, move := range slice {
-				childPV.clear()
-				pos.MakeMove(move)
+		for _, move := range slice {
+			childPV.clear()
+			pos.MakeMove(move)
 
-				score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
-				s.responses <- fmt.Sprintf("info currmove %s score %d", move.String(), score)
+			score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
+			s.responses <- fmt.Sprintf("info currmove %s score %d", move.String(), score)
 
-				pos.UndoMove(move)
+			pos.UndoMove(move)
 
-				move.SetEval(position.ScoreFromPerspective(score, pos.SideToMove))
+			move.SetEval(position.ScoreFromPerspective(score, pos.SideToMove))
 
-				if score > bestScore {
-					bestScore = score
-					pv.clear()
-					pv.catenate(move, &childPV)
+			if score > bestScore {
+				bestScore = score
+				pv.clear()
+				pv.catenate(move, &childPV)
 
-					bestMove = move
-					alpha = score
+				bestMove = move
+				alpha = score
 
-					s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
-				}
+				s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
 			}
 		}
 
