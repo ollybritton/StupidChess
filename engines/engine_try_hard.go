@@ -35,7 +35,7 @@ func (e *EngineTryHard) Prepare() error {
 		}
 	}()
 
-	go e.searcher.Listen()
+	go e.searcher.Root()
 
 	return nil
 }

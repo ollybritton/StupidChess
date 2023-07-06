@@ -14,7 +14,6 @@ type AlphaBetaSearch struct {
 	startTime time.Time
 	nextTime  time.Time
 	nodeCount int
-	stop      bool
 	options   SearchOptions
 }
 
@@ -34,56 +33,100 @@ func (s *AlphaBetaSearch) Responses() chan string {
 }
 
 func (s *AlphaBetaSearch) Stop() {
-	s.stop = true
+	s.options.Stop = true
 }
 
-func (s *AlphaBetaSearch) Listen() error {
-	var pv pvList
-	var childPV pvList
+func (s *AlphaBetaSearch) Root() error {
+	var pv pvList      // Holds the principle variation
+	var childPV pvList // Holds the principle variation of the position after the first move is made
 
 	childPV.new()
 
 	for request := range s.requests {
-		pos := request.pos
-		s.stop = false
+		pos := request.pos // Position we are searching
 
-		s.startTime = time.Now()
-		s.nextTime = time.Now()
-		s.nodeCount = 0
-		s.stop = request.options.Stop
-		s.options = request.options
+		s.startTime = time.Now()    // Record start time so we know to stop if time is up
+		s.nextTime = time.Now()     // Record next time as a counter so we can periodically print information
+		s.nodeCount = 0             // Record number of nodes so we can stop after searching a certain number of nodes
+		s.options = request.options // Store options in the search struct so we don't have to explicitly pass around.
+		s.options.Stop = false      // Make sure we don't stop straight away if we were told to stop previously
 
-		alpha, beta := position.MinEval, position.MaxEval
-		bestMove, bestScore := position.NoMove, position.NoEval
-		depth := request.options.Depth
+		// Keep track of the best move found so far. This is outside the loop so that we can return the best move found
+		// if we are asked to stop searching at a particular depth.
+		bestMove := position.NoMove
 
-		legalMoves := pos.MovesLegal()
-		slice := legalMoves.AsSlice()
+		// Generate legal moves and annotate them with the evaluation after they've taken place so we can improve
+		// move ordering in the search.
+		legalMoves := pos.MovesLegalWithEvaluation(position.EvalSimple)
 
-		for _, move := range slice {
-			childPV.clear()
-			pos.MakeMove(move)
+		// For loop for iterative deepening
+		for depth := uint(1); depth <= s.options.Depth; depth++ {
+			s.responses <- fmt.Sprintf("info starting search at depth %d", depth)
 
-			score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
-			s.responses <- fmt.Sprintf("info currmove %s score %d", move.String(), score)
+			// Sort legal moves by the evaluation calculated above
+			legalMoves.Sort()
 
-			pos.UndoMove(move)
+			// Alpha and beta
+			// Alpha here is the best score we can be guaranteed to achieve
+			// Beta here is the best score the opposing player can achieve
+			alpha, beta := position.MinEval, position.MaxEval
 
-			move.SetEval(position.ScoreFromPerspective(score, pos.SideToMove))
+			// Best score for a move found so far
+			bestScore := position.NoEval
 
-			if score > bestScore {
-				bestScore = score
-				pv.clear()
-				pv.catenate(move, &childPV)
+			for i, move := range legalMoves.AsSlice() {
+				if s.options.Stop {
+					break
+				}
 
-				bestMove = move
-				alpha = score
+				// s.responses <- fmt.Sprintf("info %s before %d", move.String(), move.Eval())
 
-				s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
+				// Clear the child PV so it can be used again for this move
+				childPV.clear()
+
+				// Make move, evaluate score of this position, and then undo move.
+				pos.MakeMove(move)
+				score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
+				pos.UndoMove(move)
+
+				if s.options.Stop {
+					break
+				}
+
+				s.responses <- fmt.Sprintf("info currmove %s score %d pv %s", move.String(), score, childPV.String())
+
+				// Store evaluation of this move so that on the next iteration the move ordering is more effective
+				move.SetEval(score)
+				legalMoves.Moves[i] = move
+
+				// If this is the best move we've seen so far...
+				if score > bestScore {
+					// Update bestScore to reflect this
+					bestScore = score
+
+					// Update the principle variation to use this move instead
+					pv.clear()
+					pv.catenate(move, &childPV)
+
+					// Record this as the best move
+					bestMove = move
+
+					// Set alpha to this score
+					alpha = score
+
+					s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
+				}
+
+				// s.responses <- fmt.Sprintf("info %s after %d", move.String(), move.Eval())
 			}
+
+			if time.Since(s.startTime) > s.options.MoveTime {
+				break
+			}
+
+			s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
 		}
 
-		s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
 		s.responses <- fmt.Sprintf("bestmove %s", bestMove.String())
 	}
 
@@ -93,63 +136,82 @@ func (s *AlphaBetaSearch) Listen() error {
 func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position) int16 {
 	s.nodeCount++
 
+	// If we're at depth 0, stop recursing and instead return a static evaluation of this position.
 	if depth <= 0 {
 		return position.ScoreFromPerspective(position.EvalSimple(pos), pos.SideToMove) // TODO: make more customisable
 	}
 
+	// Clear the principle variation
 	pv.clear()
 
+	// Generate all legal moves in this position
 	legalMoves := pos.MovesLegal()
-	slice := legalMoves.AsSlice()
 
-	bestMove, bestScore := position.NoMove, position.MinEval
+	// Initialise bestMove and bestScore to hold the best move found so far.
+	bestMove, bestScore := position.NoMove, position.NoEval
 
-	// BUG: There's issues around forced mates since there's no legal moves, and so the "bestMove" ends up being
-	// the null move. How to fix?
-	// TODO: doesn't understand draw by threefold repetition
+	// TODO: doesn't yet understand draw by threefold repetition
 
 	var childPV pvList
 
-	for _, move := range slice {
+	for _, move := range legalMoves.AsSlice() {
 		childPV.clear()
 
 		pos.MakeMove(move)
 		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
 		pos.UndoMove(move)
 
+		// If this is the best score we've found so far...
 		if score > bestScore {
+			// Update bestScore and bestMove to track this (might not need bestMove)
 			bestScore = score
 			bestMove = move
 			_ = bestMove
 
+			// Add this to the principle variation
 			pv.catenate(move, &childPV)
+
 		}
 
-		if score >= beta {
-			break
-		}
-
+		// If this is better than the best score we can guarantee so far, then update alpha to reflect this
 		if score > alpha {
 			alpha = score
 		}
 
-		if time.Since(s.nextTime) >= time.Second {
-			diff := time.Since(s.startTime)
-			s.responses <- fmt.Sprintf("info time %v ndes %v nps %v score %d pv %s", diff.Milliseconds(), s.nodeCount, s.nodeCount/int(diff.Seconds()), bestScore, pv)
-			s.nextTime = time.Now()
+		// Beta cutoff:
+		// The opposing player can guarantee a better position for themselves, so there's no point pursuing this position.
+		if alpha >= beta {
+			return alpha
 		}
 
-		if s.stop || time.Since(s.startTime) > s.options.MoveTime {
+		// Print info if required
+		if time.Since(s.nextTime) >= time.Second {
+			diff := time.Since(s.startTime)
+			s.responses <- fmt.Sprintf("info time %v ndes %v nps %v", diff.Milliseconds(), s.nodeCount, s.nodeCount/int(diff.Seconds()))
+			s.nextTime = time.Now()
+
+		}
+
+		if time.Since(s.startTime) > s.options.MoveTime {
+			s.options.Stop = true
+		}
+
+		// If required to stop early, return alpha since this is the best we can do.
+		if s.options.Stop {
 			return alpha
 		}
 
 	}
 
-	if len(slice) == 0 {
+	// If we have no moves available, it's either checkmate or stalemate, so return values
+	// that reflect this.
+	if legalMoves.Len() == 0 {
 		if pos.KingInCheck(pos.SideToMove) {
+			// Checkmate
 			return -30000 + int16(ply) + 1
 		}
 
+		// Stalemate
 		return 0 // TODO: return contempt value instead?
 	}
 
