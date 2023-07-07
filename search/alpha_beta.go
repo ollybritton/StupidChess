@@ -66,20 +66,18 @@ func (s *AlphaBetaSearch) Root() error {
 			// Sort legal moves by the evaluation calculated above
 			legalMoves.Sort()
 
-			// Alpha and beta
-			// Alpha here is the best score we can be guaranteed to achieve
-			// Beta here is the best score the opposing player can achieve
-			alpha, beta := position.MinEval, position.MaxEval
-
 			// Best score for a move found so far
 			bestScore := position.NoEval
 
 			for i, move := range legalMoves.AsSlice() {
+				// Alpha and beta
+				// Alpha here is the best score we can be guaranteed to achieve
+				// Beta here is the best score the opposing player can achieve
+				alpha, beta := position.MinEval, position.MaxEval
+
 				if s.options.Stop {
 					break
 				}
-
-				// s.responses <- fmt.Sprintf("info %s before %d", move.String(), move.Eval())
 
 				// Clear the child PV so it can be used again for this move
 				childPV.clear()
@@ -116,8 +114,6 @@ func (s *AlphaBetaSearch) Root() error {
 
 					s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
 				}
-
-				// s.responses <- fmt.Sprintf("info %s after %d", move.String(), move.Eval())
 			}
 
 			if time.Since(s.startTime) > s.options.MoveTime {
@@ -181,7 +177,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		// Beta cutoff:
 		// The opposing player can guarantee a better position for themselves, so there's no point pursuing this position.
 		if alpha >= beta {
-			return alpha
+			break
 		}
 
 		// Print info if required
