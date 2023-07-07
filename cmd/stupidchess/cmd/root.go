@@ -58,7 +58,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.stupidchess.yaml)")
-	rootCmd.PersistentFlags().StringP("engine", "e", "suicideking", "engine to use")
+	rootCmd.PersistentFlags().StringP("engine", "e", "tryhard", "engine to use")
 }
 
 // initConfig reads in config file and ENV variables if set.
