@@ -91,7 +91,7 @@ func (s *AlphaBetaSearch) Root() error {
 					break
 				}
 
-				s.responses <- fmt.Sprintf("info currmove %s score %d pv %s", move.String(), score, childPV.String())
+				s.responses <- fmt.Sprintf("info currmove %s score cp %d pv %s", move.String(), score, childPV.String())
 
 				// Store evaluation of this move so that on the next iteration the move ordering is more effective
 				move.SetEval(score)
