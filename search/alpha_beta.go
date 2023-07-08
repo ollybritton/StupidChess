@@ -2,6 +2,7 @@ package search
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -50,6 +51,22 @@ func (s *AlphaBetaSearch) Root() error {
 		s.nodeCount = 0             // Record number of nodes so we can stop after searching a certain number of nodes
 		s.options = request.options // Store options in the search struct so we don't have to explicitly pass around.
 		s.options.Stop = false      // Make sure we don't stop straight away if we were told to stop previously
+
+		// Very rudimentary time management
+		timeRemaining := 0.0
+
+		if pos.SideToMove == position.Black {
+			timeRemaining = float64(s.options.BlackTimeRemaining)
+		} else {
+			timeRemaining = float64(s.options.WhiteTimeRemaining)
+		}
+
+		if timeRemaining > float64(math.MaxUint) {
+			timeRemaining = 1_000_000
+		}
+
+		mult := math.Tanh(math.Pow(timeRemaining/1000, 0.3333) / 4)
+		s.options.MoveTime = time.Duration(int64(float64(s.options.MoveTime.Nanoseconds()) * mult))
 
 		// Keep track of the best move found so far. This is outside the loop so that we can return the best move found
 		// if we are asked to stop searching at a particular depth.
