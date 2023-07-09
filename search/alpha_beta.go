@@ -142,15 +142,27 @@ func (s *AlphaBetaSearch) Root() error {
 
 			diff := time.Since(s.startTime)
 
-			s.responses <- fmt.Sprintf(
-				"info depth %d score cp %d nodes %d nps %.0f time %d pv %s",
-				depth,
-				bestScore*100,
-				s.nodeCount,
-				1000*(float64(s.nodeCount)/float64(diff.Milliseconds())),
-				diff.Milliseconds(),
-				pv.String(),
-			)
+			if diff.Seconds() < 1 {
+				s.responses <- fmt.Sprintf(
+					"info depth %d score cp %d nodes %d time %d pv %s",
+					depth,
+					bestScore*100,
+					s.nodeCount,
+					diff.Milliseconds(),
+					pv.String(),
+				)
+			} else {
+				s.responses <- fmt.Sprintf(
+					"info depth %d score cp %d nodes %d nps %.0f time %d pv %s",
+					depth,
+					bestScore*100,
+					s.nodeCount,
+					1000*(float64(s.nodeCount)/float64(diff.Milliseconds())),
+					diff.Milliseconds(),
+					pv.String(),
+				)
+
+			}
 		}
 
 		s.responses <- fmt.Sprintf("bestmove %s", bestMove.String())
