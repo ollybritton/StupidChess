@@ -35,6 +35,8 @@ func (s *Session) Handle(commandLine string) error {
 	commandName := fields[0]
 	arguments := fields[1:]
 
+	s.engine.Prepare()
+
 	var handler func(arguments []string) error
 
 	switch commandName {
@@ -202,9 +204,9 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			}
 
 			if curr == "wtime" {
-				options.WhiteTimeRemaining = uint(milliseconds)
+				options.WhiteTimeRemaining = time.Duration(milliseconds * 1_000_000)
 			} else {
-				options.BlackTimeRemaining = uint(milliseconds)
+				options.BlackTimeRemaining = time.Duration(milliseconds * 1_000_000)
 			}
 
 		case "winc", "binc":
@@ -220,9 +222,9 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			}
 
 			if curr == "winc" {
-				options.WhiteIncrement = seconds
+				options.WhiteIncrement = time.Duration(seconds * 1_000_000_000)
 			} else {
-				options.BlackIncrement = seconds
+				options.BlackIncrement = time.Duration(seconds * 1_000_000_000)
 			}
 
 		case "movestogo":

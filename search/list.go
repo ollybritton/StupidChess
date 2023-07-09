@@ -1,6 +1,10 @@
 package search
 
-import "github.com/ollybritton/StupidChess/position"
+import (
+	"bytes"
+
+	"github.com/ollybritton/StupidChess/position"
+)
 
 type pvList []position.Move
 
@@ -27,10 +31,16 @@ func (pv *pvList) catenate(mv position.Move, pv2 *pvList) {
 }
 
 func (pv *pvList) String() string {
-	out := ""
-	for _, move := range *pv {
-		out += move.String() + " "
+	var out bytes.Buffer
+	var length = len(*pv)
+
+	for i, move := range *pv {
+		out.WriteString(move.String())
+
+		if i != length-1 {
+			out.WriteString(" ")
+		}
 	}
 
-	return out
+	return out.String()
 }

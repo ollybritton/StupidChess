@@ -18,11 +18,11 @@ type SearchOptions struct {
 	Mate        uint            // Search for mate in this many moves.
 	MoveTime    time.Duration   // Only search for the specified duration.
 
-	WhiteTimeRemaining uint    // Time remaining for white in milliseconds.
-	BlackTimeRemaining uint    // Time remaining for black in milliseconds.
-	WhiteIncrement     float64 // Increment for white in seconds.
-	BlackIncrement     float64 // Increment for black in seconds.
-	MovesToGo          uint    // Number of moves until the next time control.
+	WhiteTimeRemaining time.Duration // Time remaining for white.
+	BlackTimeRemaining time.Duration // Time remaining for black.
+	WhiteIncrement     time.Duration // Increment for white.
+	BlackIncrement     time.Duration // Increment for black.
+	MovesToGo          uint          // Number of moves until the next time control.
 
 	Stop bool
 }
@@ -32,14 +32,14 @@ func NewDeafultOptions() SearchOptions {
 	return SearchOptions{
 		Infinite:           false,
 		SearchMoves:        []position.Move{},
-		Depth:              5, // math.MaxUint, // TODO: reevaluate this
+		Depth:              math.MaxUint,
 		Nodes:              math.MaxUint,
 		Mate:               math.MaxUint,
-		MoveTime:           10 * time.Second, //time.Duration(math.MaxInt64),
-		WhiteTimeRemaining: math.MaxUint,
-		BlackTimeRemaining: math.MaxUint,
-		WhiteIncrement:     math.MaxFloat64,
-		BlackIncrement:     math.MaxFloat64,
+		MoveTime:           0,
+		WhiteTimeRemaining: 1 * time.Hour, // TODO: sensible default?
+		BlackTimeRemaining: 1 * time.Hour,
+		WhiteIncrement:     0,
+		BlackIncrement:     0,
 		MovesToGo:          math.MaxUint,
 	}
 }

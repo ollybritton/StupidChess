@@ -2,7 +2,6 @@ package search
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -15,7 +14,8 @@ type AlphaBetaSearch struct {
 	startTime time.Time
 	nextTime  time.Time
 	nodeCount int
-	options   SearchOptions
+
+	options SearchOptions
 }
 
 func NewAlphaBetaSearch(requests chan Request, responses chan string) *AlphaBetaSearch {
@@ -52,21 +52,21 @@ func (s *AlphaBetaSearch) Root() error {
 		s.options = request.options // Store options in the search struct so we don't have to explicitly pass around.
 		s.options.Stop = false      // Make sure we don't stop straight away if we were told to stop previously
 
-		// Very rudimentary time management
-		timeRemaining := 0.0
+		var timeRemaining, increment time.Duration
 
-		if pos.SideToMove == position.Black {
-			timeRemaining = float64(s.options.BlackTimeRemaining)
+		if pos.SideToMove == position.White {
+			timeRemaining = s.options.WhiteTimeRemaining
+			increment = s.options.WhiteIncrement
 		} else {
-			timeRemaining = float64(s.options.WhiteTimeRemaining)
+			timeRemaining = s.options.BlackTimeRemaining
+			increment = s.options.BlackTimeRemaining
 		}
 
-		if timeRemaining > float64(math.MaxUint) {
-			timeRemaining = 1_000_000
+		if s.options.MoveTime == 0 {
+			s.options.MoveTime = DefaultTimeManager(timeRemaining, increment)
 		}
 
-		mult := math.Tanh(math.Pow(timeRemaining/1000, 0.3333) / 4)
-		s.options.MoveTime = time.Duration(int64(float64(s.options.MoveTime.Nanoseconds()) * mult))
+		s.responses <- fmt.Sprintf("info string searching for %s/%s", s.options.MoveTime, timeRemaining)
 
 		// Keep track of the best move found so far. This is outside the loop so that we can return the best move found
 		// if we are asked to stop searching at a particular depth.
@@ -78,8 +78,6 @@ func (s *AlphaBetaSearch) Root() error {
 
 		// For loop for iterative deepening
 		for depth := uint(1); depth <= s.options.Depth; depth++ {
-			s.responses <- fmt.Sprintf("info starting search at depth %d", depth)
-
 			// Sort legal moves by the evaluation calculated above
 			legalMoves.Sort()
 
@@ -108,8 +106,6 @@ func (s *AlphaBetaSearch) Root() error {
 					break
 				}
 
-				s.responses <- fmt.Sprintf("info currmove %s score cp %d pv %s", move.String(), score, childPV.String())
-
 				// Store evaluation of this move so that on the next iteration the move ordering is more effective
 				move.SetEval(score)
 				legalMoves.Moves[i] = move
@@ -128,16 +124,33 @@ func (s *AlphaBetaSearch) Root() error {
 
 					// Set alpha to this score
 					alpha = score
-
-					s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
 				}
+
+				s.responses <- fmt.Sprintf(
+					"info currmove %s currmovenumber %d nodes %d depth %d score cp %d",
+					move.String(),
+					i+1,
+					s.nodeCount,
+					depth,
+					score*100,
+				)
 			}
 
 			if time.Since(s.startTime) > s.options.MoveTime {
 				break
 			}
 
-			s.responses <- fmt.Sprintf("info score cp %v depth %v nodes %v pv %s", bestScore, depth, s.nodeCount, pv.String())
+			diff := time.Since(s.startTime)
+
+			s.responses <- fmt.Sprintf(
+				"info depth %d score cp %d nodes %d nps %.0f time %d pv %s",
+				depth,
+				bestScore*100,
+				s.nodeCount,
+				1000*(float64(s.nodeCount)/float64(diff.Milliseconds())),
+				diff.Milliseconds(),
+				pv.String(),
+			)
 		}
 
 		s.responses <- fmt.Sprintf("bestmove %s", bestMove.String())
@@ -158,7 +171,8 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	pv.clear()
 
 	// Generate all legal moves in this position
-	legalMoves := pos.MovesLegal()
+	legalMoves := pos.MovesLegalWithEvaluation(position.EvalSimple)
+	legalMoves.Sort()
 
 	// Initialise bestMove and bestScore to hold the best move found so far.
 	bestMove, bestScore := position.NoMove, position.NoEval
@@ -199,10 +213,9 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 
 		// Print info if required
 		if time.Since(s.nextTime) >= time.Second {
-			diff := time.Since(s.startTime)
-			s.responses <- fmt.Sprintf("info time %v ndes %v nps %v", diff.Milliseconds(), s.nodeCount, s.nodeCount/int(diff.Seconds()))
+			//diff := time.Since(s.startTime)
+			//s.responses <- fmt.Sprintf("info time %v ndes %v nps %v", diff.Milliseconds(), s.nodeCount, s.nodeCount/int(diff.Seconds()))
 			s.nextTime = time.Now()
-
 		}
 
 		if time.Since(s.startTime) > s.options.MoveTime {
