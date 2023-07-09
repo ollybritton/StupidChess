@@ -215,16 +215,16 @@ func (s *Session) handleCommandGo(arguments []string) error {
 			}
 
 			i++
-			secondsStr := arguments[i]
-			seconds, err := strconv.ParseFloat(secondsStr, 64)
+			millisecondsStr := arguments[i]
+			milliseconds, err := strconv.ParseFloat(millisecondsStr, 64)
 			if err != nil {
 				return fmt.Errorf("expecting number after 'winc/binc' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
 
 			if curr == "winc" {
-				options.WhiteIncrement = time.Duration(seconds * 1_000_000_000)
+				options.WhiteIncrement = time.Duration(milliseconds * 1_000_000)
 			} else {
-				options.BlackIncrement = time.Duration(seconds * 1_000_000_000)
+				options.BlackIncrement = time.Duration(milliseconds * 1_000_000)
 			}
 
 		case "movestogo":
@@ -305,7 +305,13 @@ func (s *Session) handleCommandGo(arguments []string) error {
 		i++
 	}
 
-	position := s.positions[len(s.positions)-1]
+	length := len(s.positions)
+
+	if length == 0 {
+		return fmt.Errorf("no positions to analyse")
+	}
+
+	position := s.positions[length-1]
 	err := s.engine.Go(position, options)
 	if err != nil {
 		return fmt.Errorf("got an error searching for a move, %s", err)

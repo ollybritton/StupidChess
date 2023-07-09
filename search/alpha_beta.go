@@ -66,7 +66,7 @@ func (s *AlphaBetaSearch) Root() error {
 			s.options.MoveTime = DefaultTimeManager(timeRemaining, increment)
 		}
 
-		s.responses <- fmt.Sprintf("info string searching for %s/%s", s.options.MoveTime, timeRemaining)
+		s.responses <- fmt.Sprintf("info string searching for %s/%s (inc %s)", s.options.MoveTime, timeRemaining, increment)
 
 		// Keep track of the best move found so far. This is outside the loop so that we can return the best move found
 		// if we are asked to stop searching at a particular depth.
