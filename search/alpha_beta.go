@@ -11,6 +11,10 @@ type AlphaBetaSearch struct {
 	requests  chan Request
 	responses chan string
 
+	us       position.Color
+	evalUs   position.Evaluator
+	evalThem position.Evaluator
+
 	startTime time.Time
 	nextTime  time.Time
 	nodeCount int
@@ -18,10 +22,12 @@ type AlphaBetaSearch struct {
 	options SearchOptions
 }
 
-func NewAlphaBetaSearch(requests chan Request, responses chan string) *AlphaBetaSearch {
+func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs position.Evaluator, evalThem position.Evaluator) *AlphaBetaSearch {
 	return &AlphaBetaSearch{
 		requests:  requests,
 		responses: responses,
+		evalUs:    evalUs,
+		evalThem:  evalThem,
 	}
 }
 
@@ -57,9 +63,11 @@ func (s *AlphaBetaSearch) Root() error {
 		if pos.SideToMove == position.White {
 			timeRemaining = s.options.WhiteTimeRemaining
 			increment = s.options.WhiteIncrement
+			s.us = position.White
 		} else {
 			timeRemaining = s.options.BlackTimeRemaining
 			increment = s.options.BlackTimeRemaining
+			s.us = position.Black
 		}
 
 		if s.options.MoveTime == 0 {
@@ -176,7 +184,11 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 
 	// If we're at depth 0, stop recursing and instead return a static evaluation of this position.
 	if depth <= 0 {
-		return position.ScoreFromPerspective(position.EvalSimple(pos), pos.SideToMove) // TODO: make more customisable
+		if pos.SideToMove == s.us {
+			return position.ScoreFromPerspective(s.evalUs(pos), pos.SideToMove)
+		} else {
+			return position.ScoreFromPerspective(s.evalThem(pos), pos.SideToMove)
+		}
 	}
 
 	// Clear the principle variation

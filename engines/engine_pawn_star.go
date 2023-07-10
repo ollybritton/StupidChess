@@ -7,33 +7,33 @@ import (
 	"github.com/ollybritton/StupidChess/search"
 )
 
-type EngineTryHard struct {
+type EnginePawnStar struct {
 	searcher search.Searcher
 }
 
-func NewEngineTryHard() *EngineTryHard {
+func NewEnginePawnStar() *EnginePawnStar {
 	requests := make(chan search.Request)
 	responses := make(chan string)
 
-	return &EngineTryHard{
+	return &EnginePawnStar{
 		searcher: search.NewAlphaBetaSearch(
 			requests,
 			responses,
-			position.EvalComplex,
-			position.EvalComplex,
+			position.EvalPawnStarUs,
+			position.EvalPawnStarThem,
 		),
 	}
 }
 
-func (e *EngineTryHard) Name() string {
-	return "try-hard"
+func (e *EnginePawnStar) Name() string {
+	return "pawn-star"
 }
 
-func (e *EngineTryHard) Author() string {
+func (e *EnginePawnStar) Author() string {
 	return "Olly Britton"
 }
 
-func (e *EngineTryHard) Prepare() error {
+func (e *EnginePawnStar) Prepare() error {
 	go func() {
 		for msg := range e.searcher.Responses() {
 			fmt.Println(msg)
@@ -45,16 +45,16 @@ func (e *EngineTryHard) Prepare() error {
 	return nil
 }
 
-func (e *EngineTryHard) NewGame() error {
+func (e *EnginePawnStar) NewGame() error {
 	return nil
 }
 
-func (e *EngineTryHard) Go(pos *position.Position, options search.SearchOptions) error {
+func (e *EnginePawnStar) Go(pos *position.Position, options search.SearchOptions) error {
 	e.searcher.Requests() <- search.NewRequest(pos, options)
 
 	return nil
 }
 
-func (e *EngineTryHard) Stop() {
+func (e *EnginePawnStar) Stop() {
 	e.searcher.Stop()
 }

@@ -5,4 +5,5 @@ var EngineInfo = map[string]Engine{
 	"random":      NewEngineRandom(),
 	"suicideking": NewEngineSuicideKing(),
 	"tryhard":     NewEngineTryHard(),
+	"pawnstar":    NewEnginePawnStar(),
 }

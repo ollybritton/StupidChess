@@ -13,7 +13,10 @@ const (
 type Evaluator func(p *Position) int16
 
 var EvaluatorInfo = map[string]Evaluator{
-	"simple": EvalSimple,
+	"simple":        EvalSimple,
+	"complex":       EvalComplex,
+	"pawnstar-us":   EvalPawnStarUs,
+	"pawnstar-them": EvalPawnStarThem,
 }
 
 // GetEvaluator looks up an evaluator by name.
