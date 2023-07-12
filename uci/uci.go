@@ -9,7 +9,8 @@ import (
 	"github.com/ollybritton/StupidChess/engines"
 )
 
-// UCI is the bridge between a UCI-compliant UI and an engine.
+// uci implements the universal chess interface (UCI) both from the perspective of the engine (in `as_engine.go`) and
+// from the persepctive of the GUI (in `as_gui.go`).
 
 func log(msg string) {
 	logfile := `/tmp/stupidchess-debug-in`
@@ -32,7 +33,7 @@ func log(msg string) {
 // In actual use, this will be called with os.Stdin as the first argument.
 func Listen(input io.Reader, eng engines.Engine) {
 	scanner := bufio.NewScanner(input)
-	session := NewSession(eng)
+	session := NewEngineSession(eng)
 	for scanner.Scan() {
 		commandLine := scanner.Text()
 		log(commandLine)

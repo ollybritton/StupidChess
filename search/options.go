@@ -1,7 +1,9 @@
 package search
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -24,6 +26,8 @@ type SearchOptions struct {
 	BlackIncrement     time.Duration // Increment for black.
 	MovesToGo          uint          // Number of moves until the next time control.
 
+	// TODO: implement pondering
+
 	Stop bool
 }
 
@@ -34,7 +38,7 @@ func NewDeafultOptions() SearchOptions {
 		SearchMoves:        []position.Move{},
 		Depth:              math.MaxUint,
 		Nodes:              math.MaxUint,
-		Mate:               math.MaxUint,
+		Mate:               0,
 		MoveTime:           0,
 		WhiteTimeRemaining: 1 * time.Hour, // TODO: sensible default?
 		BlackTimeRemaining: 1 * time.Hour,
@@ -42,4 +46,62 @@ func NewDeafultOptions() SearchOptions {
 		BlackIncrement:     0,
 		MovesToGo:          math.MaxUint,
 	}
+}
+
+// AsUCI returns the options in the UCI format as a string.
+// TODO: would it be better to have a seperate struct in the UCI package and then a function to convert between them?
+func (opt *SearchOptions) AsUCI() string {
+	var fields []string
+
+	if len(opt.SearchMoves) != 0 {
+		fields = append(fields, "searchmoves")
+
+		for _, move := range opt.SearchMoves {
+			fields = append(fields, move.String())
+		}
+	}
+
+	// TODO: implement ponder
+
+	if opt.WhiteTimeRemaining != 0 {
+		fields = append(fields, fmt.Sprintf("wtime %d", opt.WhiteTimeRemaining.Milliseconds()))
+	}
+
+	if opt.BlackTimeRemaining != 0 {
+		fields = append(fields, fmt.Sprintf("btime %d", opt.BlackTimeRemaining.Milliseconds()))
+	}
+
+	if opt.WhiteIncrement != 0 {
+		fields = append(fields, fmt.Sprintf("winc %d", opt.WhiteIncrement.Milliseconds()))
+	}
+
+	if opt.BlackIncrement != 0 {
+		fields = append(fields, fmt.Sprintf("binc %d", opt.BlackIncrement.Milliseconds()))
+	}
+
+	if opt.MovesToGo != math.MaxUint {
+		fields = append(fields, fmt.Sprintf("movestogo %d", opt.MovesToGo))
+	}
+
+	if opt.Depth != math.MaxUint {
+		fields = append(fields, fmt.Sprintf("depth %d", opt.Depth))
+	}
+
+	if opt.Nodes != math.MaxUint {
+		fields = append(fields, fmt.Sprintf("nodes %d", opt.Nodes))
+	}
+
+	if opt.Mate != 0 {
+		fields = append(fields, fmt.Sprintf("mate %d", opt.Mate))
+	}
+
+	if opt.MoveTime != 0 {
+		fields = append(fields, fmt.Sprintf("movetime %d", opt.MoveTime.Milliseconds()))
+	}
+
+	if opt.Infinite {
+		fields = append(fields, "infinite")
+	}
+
+	return strings.Join(fields, " ")
 }

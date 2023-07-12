@@ -12,20 +12,23 @@ import (
 	"github.com/ollybritton/StupidChess/search"
 )
 
-type Session struct {
+// EngineSession represents a UCI session from the perspective of the engine.
+// The main entry point is the Handle method, which given a command from the GUI will carry out the required logic.
+// For more about the UCI protocol: https://gist.github.com/DOBRO/2592c6dad754ba67e6dcaec8c90165bf
+type EngineSession struct {
 	engine    engines.Engine
 	positions []*position.Position
 	moves     []position.Move
 }
 
-func NewSession(eng engines.Engine) *Session {
-	return &Session{
+func NewEngineSession(eng engines.Engine) *EngineSession {
+	return &EngineSession{
 		engine:    eng,
 		positions: []*position.Position{},
 	}
 }
 
-func (s *Session) Handle(commandLine string) error {
+func (s *EngineSession) Handle(commandLine string) error {
 	fields := strings.Fields(commandLine)
 
 	if len(fields) == 0 {
@@ -97,7 +100,7 @@ func (s *Session) Handle(commandLine string) error {
 	return handler(arguments)
 }
 
-func (s *Session) handleCommandUci(arguments []string) error {
+func (s *EngineSession) handleCommandUci(arguments []string) error {
 	fmt.Printf("id name %s\n", s.engine.Name())
 	fmt.Printf("id author %s\n", s.engine.Author())
 
@@ -111,7 +114,7 @@ func (s *Session) handleCommandUci(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandIsReady(arguments []string) error {
+func (s *EngineSession) handleCommandIsReady(arguments []string) error {
 	err := s.engine.Prepare()
 	if err != nil {
 		return err
@@ -129,7 +132,7 @@ func (s *Session) handleCommandIsReady(arguments []string) error {
 // Long algebraic notation moves look like so:
 //
 //	e2e4, e7e5, e1g1 (white short castling), e7e8q (for promotion)
-func (s *Session) handleCommandPosition(arguments []string) error {
+func (s *EngineSession) handleCommandPosition(arguments []string) error {
 	fen := ""
 	var moves []string
 
@@ -179,7 +182,7 @@ func (s *Session) handleCommandPosition(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandGo(arguments []string) error {
+func (s *EngineSession) handleCommandGo(arguments []string) error {
 	options := search.NewDeafultOptions()
 
 	var i int
@@ -320,13 +323,13 @@ func (s *Session) handleCommandGo(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandStop(arguments []string) error {
+func (s *EngineSession) handleCommandStop(arguments []string) error {
 	s.engine.Stop()
 
 	return nil
 }
 
-func (s *Session) handleCommandNewGame(arguments []string) error {
+func (s *EngineSession) handleCommandNewGame(arguments []string) error {
 	// TODO: implement special logic around ucinewgame command
 	err := s.engine.NewGame()
 	if err != nil {
@@ -336,11 +339,11 @@ func (s *Session) handleCommandNewGame(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandUnknown(arguments []string) error {
+func (s *EngineSession) handleCommandUnknown(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandPrettyPrint(arguments []string) error {
+func (s *EngineSession) handleCommandPrettyPrint(arguments []string) error {
 	if len(s.positions) == 0 {
 		fmt.Println("nothing to pretty print, no positions yet")
 	} else {
@@ -352,7 +355,7 @@ func (s *Session) handleCommandPrettyPrint(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandBitboards(arguments []string) error {
+func (s *EngineSession) handleCommandBitboards(arguments []string) error {
 	if len(s.positions) == 0 {
 		fmt.Println("nothing to pretty print, no positions yet")
 	} else {
@@ -395,7 +398,7 @@ func (s *Session) handleCommandBitboards(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandPseudolegalMoves(arguments []string) error {
+func (s *EngineSession) handleCommandPseudolegalMoves(arguments []string) error {
 	length := len(s.positions)
 
 	if length == 0 {
@@ -418,7 +421,7 @@ func (s *Session) handleCommandPseudolegalMoves(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandLegalMoves(arguments []string) error {
+func (s *EngineSession) handleCommandLegalMoves(arguments []string) error {
 	length := len(s.positions)
 
 	if length == 0 {
@@ -441,7 +444,7 @@ func (s *Session) handleCommandLegalMoves(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandIsAttacked(arguments []string) error {
+func (s *EngineSession) handleCommandIsAttacked(arguments []string) error {
 	length := len(s.positions)
 
 	if length == 0 {
@@ -467,7 +470,7 @@ func (s *Session) handleCommandIsAttacked(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandMakeMove(arguments []string) error {
+func (s *EngineSession) handleCommandMakeMove(arguments []string) error {
 	length := len(s.positions)
 
 	if length == 0 {
@@ -501,7 +504,7 @@ func (s *Session) handleCommandMakeMove(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandPerft(arguments []string) error {
+func (s *EngineSession) handleCommandPerft(arguments []string) error {
 	if len(s.positions) == 0 {
 		return fmt.Errorf("no position to analyse")
 	}
@@ -520,7 +523,7 @@ func (s *Session) handleCommandPerft(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandDivide(arguments []string) error {
+func (s *EngineSession) handleCommandDivide(arguments []string) error {
 	if len(s.positions) == 0 {
 		return fmt.Errorf("no position to analyse")
 	}
@@ -539,7 +542,7 @@ func (s *Session) handleCommandDivide(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandFen(arguments []string) error {
+func (s *EngineSession) handleCommandFen(arguments []string) error {
 	length := len(s.positions)
 	if length == 0 {
 		return fmt.Errorf("no position to analyse")
@@ -551,7 +554,7 @@ func (s *Session) handleCommandFen(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandUndoMove(arguments []string) error {
+func (s *EngineSession) handleCommandUndoMove(arguments []string) error {
 	movesLength := len(s.moves)
 	if movesLength == 0 {
 		return fmt.Errorf("no moves to undo")
@@ -568,7 +571,7 @@ func (s *Session) handleCommandUndoMove(arguments []string) error {
 	return nil
 }
 
-func (s *Session) handleCommandEvaluate(arguments []string) error {
+func (s *EngineSession) handleCommandEvaluate(arguments []string) error {
 	if len(arguments) == 0 {
 		return fmt.Errorf("expecting evaluator name")
 	}
