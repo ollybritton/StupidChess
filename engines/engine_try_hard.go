@@ -9,6 +9,7 @@ import (
 
 type EngineTryHard struct {
 	searcher search.Searcher
+	prepared bool
 }
 
 func NewEngineTryHard() *EngineTryHard {
@@ -34,6 +35,14 @@ func (e *EngineTryHard) Author() string {
 }
 
 func (e *EngineTryHard) Prepare() error {
+	// Prepare is idempotent: it starts the response pump and search goroutine exactly once. It used to
+	// be invoked on every UCI command, which spawned a fresh pair of goroutines each time and left
+	// several readers draining the same responses channel (duplicated and interleaved output).
+	if e.prepared {
+		return nil
+	}
+	e.prepared = true
+
 	go func() {
 		for msg := range e.searcher.Responses() {
 			fmt.Println(msg)

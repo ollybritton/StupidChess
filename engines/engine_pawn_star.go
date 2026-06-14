@@ -9,6 +9,7 @@ import (
 
 type EnginePawnStar struct {
 	searcher search.Searcher
+	prepared bool
 }
 
 func NewEnginePawnStar() *EnginePawnStar {
@@ -34,6 +35,12 @@ func (e *EnginePawnStar) Author() string {
 }
 
 func (e *EnginePawnStar) Prepare() error {
+	// Idempotent; see EngineTryHard.Prepare for why.
+	if e.prepared {
+		return nil
+	}
+	e.prepared = true
+
 	go func() {
 		for msg := range e.searcher.Responses() {
 			fmt.Println(msg)

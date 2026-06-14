@@ -2,6 +2,7 @@ package search
 
 import (
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -20,6 +21,16 @@ type AlphaBetaSearch struct {
 	nodeCount int
 
 	options SearchOptions
+
+	// stop is set from another goroutine (via Stop) to abort the current search. It is accessed
+	// atomically because the search runs on its own goroutine; the previous code used a plain bool on
+	// the shared options struct, which was a data race.
+	stop int32
+}
+
+// stopped reports whether the search has been asked to abort.
+func (s *AlphaBetaSearch) stopped() bool {
+	return atomic.LoadInt32(&s.stop) == 1
 }
 
 func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs position.Evaluator, evalThem position.Evaluator) *AlphaBetaSearch {
@@ -40,7 +51,7 @@ func (s *AlphaBetaSearch) Responses() chan string {
 }
 
 func (s *AlphaBetaSearch) Stop() {
-	s.options.Stop = true
+	atomic.StoreInt32(&s.stop, 1)
 }
 
 func (s *AlphaBetaSearch) Root() error {
@@ -52,11 +63,11 @@ func (s *AlphaBetaSearch) Root() error {
 	for request := range s.requests {
 		pos := request.pos // Position we are searching
 
-		s.startTime = time.Now()    // Record start time so we know to stop if time is up
-		s.nextTime = time.Now()     // Record next time as a counter so we can periodically print information
-		s.nodeCount = 0             // Record number of nodes so we can stop after searching a certain number of nodes
-		s.options = request.options // Store options in the search struct so we don't have to explicitly pass around.
-		s.options.Stop = false      // Make sure we don't stop straight away if we were told to stop previously
+		s.startTime = time.Now()      // Record start time so we know to stop if time is up
+		s.nextTime = time.Now()       // Record next time as a counter so we can periodically print information
+		s.nodeCount = 0               // Record number of nodes so we can stop after searching a certain number of nodes
+		s.options = request.options   // Store options in the search struct so we don't have to explicitly pass around.
+		atomic.StoreInt32(&s.stop, 0) // Make sure we don't stop straight away if we were told to stop previously
 
 		var timeRemaining, increment time.Duration
 
@@ -66,7 +77,7 @@ func (s *AlphaBetaSearch) Root() error {
 			s.us = position.White
 		} else {
 			timeRemaining = s.options.BlackTimeRemaining
-			increment = s.options.BlackTimeRemaining
+			increment = s.options.BlackIncrement
 			s.us = position.Black
 		}
 
@@ -92,13 +103,15 @@ func (s *AlphaBetaSearch) Root() error {
 			// Best score for a move found so far
 			bestScore := position.NoEval
 
-			for i, move := range legalMoves.AsSlice() {
-				// Alpha and beta
-				// Alpha here is the best score we can be guaranteed to achieve
-				// Beta here is the best score the opposing player can achieve
-				alpha, beta := position.MinEval, position.MaxEval
+			// Alpha and beta bound the search window. Alpha is the best score we can already guarantee,
+			// beta the best the opponent can hold us to. They are initialised once per depth (not per
+			// move) so that alpha rises as better root moves are found and later moves are searched with
+			// a narrowing window. A previous version reset them inside the move loop, which disabled all
+			// pruning at the root.
+			alpha, beta := position.MinEval, position.MaxEval
 
-				if s.options.Stop {
+			for i, move := range legalMoves.AsSlice() {
+				if s.stopped() {
 					break
 				}
 
@@ -110,7 +123,7 @@ func (s *AlphaBetaSearch) Root() error {
 				score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
 				pos.UndoMove(move)
 
-				if s.options.Stop {
+				if s.stopped() {
 					break
 				}
 
@@ -135,12 +148,12 @@ func (s *AlphaBetaSearch) Root() error {
 				}
 
 				s.responses <- fmt.Sprintf(
-					"info currmove %s currmovenumber %d nodes %d depth %d score cp %d",
+					"info currmove %s currmovenumber %d nodes %d depth %d score %s",
 					move.String(),
 					i+1,
 					s.nodeCount,
 					depth,
-					score*100,
+					formatScore(score),
 				)
 			}
 
@@ -152,18 +165,18 @@ func (s *AlphaBetaSearch) Root() error {
 
 			if diff.Seconds() < 1 {
 				s.responses <- fmt.Sprintf(
-					"info depth %d score cp %d nodes %d time %d pv %s",
+					"info depth %d score %s nodes %d time %d pv %s",
 					depth,
-					bestScore*100,
+					formatScore(bestScore),
 					s.nodeCount,
 					diff.Milliseconds(),
 					pv.String(),
 				)
 			} else {
 				s.responses <- fmt.Sprintf(
-					"info depth %d score cp %d nodes %d nps %.0f time %d pv %s",
+					"info depth %d score %s nodes %d nps %.0f time %d pv %s",
 					depth,
-					bestScore*100,
+					formatScore(bestScore),
 					s.nodeCount,
 					1000*(float64(s.nodeCount)/float64(diff.Milliseconds())),
 					diff.Milliseconds(),
@@ -243,11 +256,17 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		}
 
 		if time.Since(s.startTime) > s.options.MoveTime {
-			s.options.Stop = true
+			atomic.StoreInt32(&s.stop, 1)
+		}
+
+		// Honour an explicit node limit (`go nodes N`). The default is math.MaxUint, so this never fires
+		// unless a limit was actually requested.
+		if uint(s.nodeCount) >= s.options.Nodes {
+			atomic.StoreInt32(&s.stop, 1)
 		}
 
 		// If required to stop early, return alpha since this is the best we can do.
-		if s.options.Stop {
+		if s.stopped() {
 			return alpha
 		}
 
@@ -266,4 +285,25 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	}
 
 	return bestScore
+}
+
+// formatScore renders an internal evaluation as a UCI "score" token. Near-extreme scores are forced
+// mates (checkmate returns roughly ±MaxEval offset by the ply at which it occurs), so they are
+// reported as "mate N" (N negative when we are the side being mated). Everything else is reported in
+// centipawns. The conversion is done here, in ints, because the old code printed score*100 directly as
+// an int16 and overflowed wildly on mate scores. One internal unit equals one pawn (see simpleEvalTable).
+func formatScore(score int16) string {
+	const mateThreshold = position.MaxEval - 1000
+	s := int(score)
+
+	switch {
+	case s > int(mateThreshold):
+		// We are delivering mate. Distance in plies is MaxEval - score; convert to full moves.
+		return fmt.Sprintf("mate %d", (int(position.MaxEval)-s+1)/2)
+	case s < -int(mateThreshold):
+		// We are being mated.
+		return fmt.Sprintf("mate -%d", (int(position.MaxEval)+s+1)/2)
+	default:
+		return fmt.Sprintf("cp %d", s*100)
+	}
 }

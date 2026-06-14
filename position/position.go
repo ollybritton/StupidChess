@@ -22,6 +22,11 @@ type Position struct {
 
 	HalfmoveClock uint // HalfmoveClock stores the number of halfmoves since the last capture or pawn advance.
 	FullMoves     uint // FullMoves stores the number of full moves.
+
+	// halfmoveClockHistory is a stack of prior HalfmoveClock values, pushed by MakeMove and popped by
+	// UndoMove. The clock can't be reconstructed from a move alone (it is path dependent), so unlike the
+	// castling rights and en passant target it isn't packed into the Move and is tracked here instead.
+	halfmoveClockHistory []uint
 }
 
 const StartingPosition string = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -29,9 +34,12 @@ const NoEnPassant uint8 = 255
 
 // NewPositionFromFEN converts a valid FEN string into a Board struct.
 // FEN strings look like so:
-//   rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+//
+//	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+//
 // In general:
-// 	 <rank 1>/<rank 2>/<rank 3>/<rank 4>/<rank 5>/<rank 6>/<rank 7>/<rank 8> <side to move> <castling rights> <en passant target> <halfmove clock> <full moves>
+//
+//	<rank 1>/<rank 2>/<rank 3>/<rank 4>/<rank 5>/<rank 6>/<rank 7>/<rank 8> <side to move> <castling rights> <en passant target> <halfmove clock> <full moves>
 func NewPositionFromFEN(input string) (*Position, error) {
 	sections := strings.Split(input, " ")
 
@@ -190,9 +198,12 @@ func NewPositionFromFEN(input string) (*Position, error) {
 
 // StringFEN returns the current position's FEN string.
 // FEN strings look like so:
-//   rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+//
+//	rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+//
 // In general:
-// 	 <rank 1>/<rank 2>/<rank 3>/<rank 4>/<rank 5>/<rank 6>/<rank 7>/<rank 8> <side to move> <castling rights> <en passant target> <halfmove clock> <full moves>
+//
+//	<rank 1>/<rank 2>/<rank 3>/<rank 4>/<rank 5>/<rank 6>/<rank 7>/<rank 8> <side to move> <castling rights> <en passant target> <halfmove clock> <full moves>
 func (b *Position) StringFEN() string {
 	var out bytes.Buffer
 
@@ -322,6 +333,34 @@ func (p *Position) MakeMove(m Move) bool {
 	movingPiece := p.Squares[m.From()]
 	var newEnPassantTarget uint8 = NoEnPassant
 
+	// Capture pre-move state before any squares are mutated, so the castling and halfmove-clock logic
+	// below can reason about the board as it was.
+	capturedOnTarget := p.Squares[m.To()]
+	priorEnPassant := p.EnPassant
+	isPawnMove := movingPiece == WhitePawn || movingPiece == BlackPawn
+	isCapture := capturedOnTarget != Empty || (isPawnMove && priorEnPassant != NoEnPassant && m.To() == priorEnPassant)
+
+	// Remember the halfmove clock so UndoMove can restore it.
+	p.halfmoveClockHistory = append(p.halfmoveClockHistory, p.HalfmoveClock)
+
+	// Revoke castling rights when a rook is captured on its home square. This is handled independently
+	// of the moving piece because a rook or the king can itself capture a rook, in which case the
+	// moving-piece cases in the switch below would otherwise shadow this and leave the right set.
+	switch capturedOnTarget {
+	case WhiteRook:
+		if m.To() == SquareA1 {
+			p.Castling.off(longW)
+		} else if m.To() == SquareH1 {
+			p.Castling.off(shortW)
+		}
+	case BlackRook:
+		if m.To() == SquareA8 {
+			p.Castling.off(longB)
+		} else if m.To() == SquareH8 {
+			p.Castling.off(shortB)
+		}
+	}
+
 	switch {
 	case movingPiece == WhiteKing:
 		// Disable any type of castling for the white king as they have moved.
@@ -369,20 +408,6 @@ func (p *Position) MakeMove(m Move) bool {
 		} else if m.From() == SquareH8 {
 			p.Castling.off(shortB)
 		}
-	case p.Squares[m.To()] == WhiteRook:
-		// Disable castling when a white rook is taken.
-		if m.To() == SquareA1 {
-			p.Castling.off(longW)
-		} else if m.To() == SquareH1 {
-			p.Castling.off(shortW)
-		}
-	case p.Squares[m.To()] == BlackRook:
-		// Disable castling when a black rook is taken.
-		if m.To() == SquareA8 {
-			p.Castling.off(longB)
-		} else if m.To() == SquareH8 {
-			p.Castling.off(shortB)
-		}
 	case movingPiece == WhitePawn && p.Squares[m.To()] == Empty:
 		if m.To()-m.From() == 16 {
 			// The pawn has moved two full squares onto an empty square.
@@ -414,21 +439,26 @@ func (p *Position) MakeMove(m Move) bool {
 
 	p.SideToMove = p.SideToMove.Invert()
 
+	// Update the fullmove counter before the legality check, mirroring the unconditional decrement in
+	// UndoMove. It used to live after the check, so an illegal move (which self-undoes below) decremented
+	// the counter without ever having incremented it, drifting FullMoves down until it underflowed across
+	// the many make/unmake pairs that legal-move filtering performs.
+	if p.SideToMove == White {
+		p.FullMoves += 1
+	}
+
 	if p.KingInCheck(p.SideToMove.Invert()) {
 		p.UndoMove(m)
 		return false
 	}
 
-	// If the side to move is now white, we can update the fullmove clock.
-	if p.SideToMove == White {
-		p.FullMoves += 1
-	}
-
-	// If there has been no capture and it's not a pawn move, then we need to increment the halfmove clock.
-	if movingPiece != WhitePawn && movingPiece != BlackPawn && p.Squares[m.To()] != Empty {
-		p.HalfmoveClock += 1
-	} else {
+	// The halfmove clock resets on a pawn move or a capture, and otherwise increments. Both isPawnMove
+	// and isCapture were computed from the board before the move was applied (a previous version checked
+	// p.Squares[m.To()] here, after the piece had already been moved onto it, so it never saw a capture).
+	if isPawnMove || isCapture {
 		p.HalfmoveClock = 0
+	} else {
+		p.HalfmoveClock += 1
 	}
 
 	return true
@@ -486,8 +516,12 @@ func (p *Position) UndoMove(m Move) {
 		p.FullMoves -= 1
 	}
 
-	// TODO: update proper recovery of the fullmove and halfmove clock
-
+	// Restore the halfmove clock that MakeMove saved. It can't be derived from the move, so it is kept
+	// on a stack instead of being packed into the Move (see Position.halfmoveClockHistory).
+	if n := len(p.halfmoveClockHistory); n > 0 {
+		p.HalfmoveClock = p.halfmoveClockHistory[n-1]
+		p.halfmoveClockHistory = p.halfmoveClockHistory[:n-1]
+	}
 }
 
 // KingInCheck returns true if the given side to move has their king in check.

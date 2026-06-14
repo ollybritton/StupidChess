@@ -38,8 +38,6 @@ func (s *EngineSession) Handle(commandLine string) error {
 	commandName := fields[0]
 	arguments := fields[1:]
 
-	s.engine.Prepare()
-
 	var handler func(arguments []string) error
 
 	switch commandName {
@@ -145,8 +143,11 @@ func (s *EngineSession) handleCommandPosition(arguments []string) error {
 
 		if len(arguments) == 1 {
 			moves = []string{} // i.e. no moves were specified, it was just "position startpos"
-		} else {
+		} else if arguments[1] == "moves" {
 			moves = arguments[2:]
+		} else {
+			// Be lenient with senders that omit the literal "moves" keyword.
+			moves = arguments[1:]
 		}
 
 	} else {
@@ -183,6 +184,12 @@ func (s *EngineSession) handleCommandPosition(arguments []string) error {
 }
 
 func (s *EngineSession) handleCommandGo(arguments []string) error {
+	// Make sure the engine's search goroutine is running. Prepare is idempotent, so this is a no-op if
+	// the GUI already sent "isready" (which most do before searching).
+	if err := s.engine.Prepare(); err != nil {
+		return err
+	}
+
 	options := search.NewDeafultOptions()
 
 	var i int
@@ -207,9 +214,9 @@ func (s *EngineSession) handleCommandGo(arguments []string) error {
 			}
 
 			if curr == "wtime" {
-				options.WhiteTimeRemaining = time.Duration(milliseconds * 1_000_000)
+				options.WhiteTimeRemaining = time.Millisecond * time.Duration(milliseconds)
 			} else {
-				options.BlackTimeRemaining = time.Duration(milliseconds * 1_000_000)
+				options.BlackTimeRemaining = time.Millisecond * time.Duration(milliseconds)
 			}
 
 		case "winc", "binc":
@@ -219,15 +226,15 @@ func (s *EngineSession) handleCommandGo(arguments []string) error {
 
 			i++
 			millisecondsStr := arguments[i]
-			milliseconds, err := strconv.ParseFloat(millisecondsStr, 64)
+			milliseconds, err := strconv.Atoi(millisecondsStr)
 			if err != nil {
 				return fmt.Errorf("expecting number after 'winc/binc' option in 'go' command 'go %s', got error: %w", strings.Join(arguments, " "), err)
 			}
 
 			if curr == "winc" {
-				options.WhiteIncrement = time.Duration(milliseconds * 1_000_000)
+				options.WhiteIncrement = time.Millisecond * time.Duration(milliseconds)
 			} else {
-				options.BlackIncrement = time.Duration(milliseconds * 1_000_000)
+				options.BlackIncrement = time.Millisecond * time.Duration(milliseconds)
 			}
 
 		case "movestogo":

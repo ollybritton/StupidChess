@@ -4,7 +4,7 @@ import "time"
 
 // TimeManager is a function that, given the time remaining and the increment, calculates how long we should spend
 // on the position.
-type TimeManager func(timeRemaining time.Duration, options SearchOptions) time.Duration
+type TimeManager func(timeRemaining time.Duration, increment time.Duration) time.Duration
 
 var DefaultTimeManager = defaultTimeManager
 

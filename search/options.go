@@ -27,8 +27,6 @@ type SearchOptions struct {
 	MovesToGo          uint          // Number of moves until the next time control.
 
 	// TODO: implement pondering
-
-	Stop bool
 }
 
 // NewDefaultOptions returns the default search options for an engine.
