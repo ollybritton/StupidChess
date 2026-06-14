@@ -22,6 +22,10 @@ type AlphaBetaSearch struct {
 
 	options SearchOptions
 
+	// tt caches results across the search tree (and across moves in a game) so transposed positions
+	// aren't re-searched and the best move from a prior search is tried first. nil disables it.
+	tt *transpositionTable
+
 	// stop is set from another goroutine (via Stop) to abort the current search. It is accessed
 	// atomically because the search runs on its own goroutine; the previous code used a plain bool on
 	// the shared options struct, which was a data race.
@@ -39,6 +43,7 @@ func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs pos
 		responses: responses,
 		evalUs:    evalUs,
 		evalThem:  evalThem,
+		tt:        newTranspositionTable(),
 	}
 }
 
@@ -195,13 +200,40 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 
 	pv.clear()
 
-	// Generate pseudolegal moves and order them (captures first by MVV-LVA). Legality is checked
-	// lazily: MakeMove returns false when a move leaves our own king in check, which is cheaper than
-	// fully filtering the list up front.
+	alphaOrig := alpha
+
+	// Probe the transposition table. A stored result searched at least as deep can cut this node off
+	// immediately; otherwise its best move still improves our move ordering.
+	var ttMove position.Move = position.NoMove
+	var hash uint64
+	if s.tt != nil {
+		hash = pos.ZobristHash()
+		if e, ok := s.tt.probe(hash); ok {
+			ttMove = e.move
+			if uint(e.depth) >= depth {
+				switch {
+				case e.bound == boundExact:
+					return e.score
+				case e.bound == boundLower && e.score >= beta:
+					return e.score
+				case e.bound == boundUpper && e.score <= alpha:
+					return e.score
+				}
+			}
+		}
+	}
+
+	// Generate pseudolegal moves and order them: captures first by MVV-LVA, with the TT move ahead of
+	// everything. Legality is checked lazily — MakeMove returns false when a move leaves our own king
+	// in check, which is cheaper than fully filtering the list up front.
 	moves := pos.MovesPseudolegal()
 	moves.OrderMVVLVA()
+	if ttMove != position.NoMove {
+		moves.PrioritizeMove(ttMove)
+	}
 
 	bestScore := position.NoEval
+	bestMove := position.NoMove
 	legalCount := 0
 
 	// TODO: doesn't yet understand draw by threefold repetition
@@ -220,6 +252,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 
 		if score > bestScore {
 			bestScore = score
+			bestMove = move
 			pv.catenate(move, &childPV)
 		}
 		if score > alpha {
@@ -238,7 +271,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			atomic.StoreInt32(&s.stop, 1)
 		}
 		if s.stopped() {
-			return alpha
+			return alpha // aborted: don't store a partial result
 		}
 	}
 
@@ -248,6 +281,17 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			return position.MinEval + int16(ply) + 1
 		}
 		return 0 // stalemate; TODO: return a contempt value instead
+	}
+
+	// Store the result. Mate scores are ply-relative, so they are kept out of the ply-agnostic table.
+	if s.tt != nil && !isMateScore(bestScore) {
+		bound := boundExact
+		if bestScore <= alphaOrig {
+			bound = boundUpper
+		} else if bestScore >= beta {
+			bound = boundLower
+		}
+		s.tt.store(hash, depth, bestScore, bound, bestMove)
 	}
 
 	return bestScore

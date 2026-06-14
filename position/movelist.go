@@ -91,6 +91,24 @@ func (l *MoveList) OrderMVVLVA() {
 	l.Sort()
 }
 
+// PrioritizeMove moves the entry matching target (by from, to and promotion) to the front of the
+// list, so a known-good move — typically the transposition table's best move — is searched first.
+// It is a no-op if no such move is present.
+func (l *MoveList) PrioritizeMove(target Move) {
+	for i := range l.Moves {
+		if l.Moves[i].From() == target.From() &&
+			l.Moves[i].To() == target.To() &&
+			l.Moves[i].Promotion() == target.Promotion() {
+			if i != 0 {
+				m := l.Moves[i]
+				copy(l.Moves[1:i+1], l.Moves[0:i])
+				l.Moves[0] = m
+			}
+			return
+		}
+	}
+}
+
 // Filter removes moves in the move list according to a function that evaluates a move and says whether it is allowed in the
 // list or not.
 func (l *MoveList) Filter(allowedFunc func(Move) bool) {
