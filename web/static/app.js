@@ -410,7 +410,7 @@ function renderEvalBar(score, side) {
   const fill = $("#evalbar-fill");
   const label = $("#evalbar-label");
   if (!score || typeof score.value !== "number") {
-    fill.style.height = "50%";
+    fill.style.width = "50%";
     label.textContent = "0.00";
     return;
   }
@@ -420,7 +420,7 @@ function renderEvalBar(score, side) {
 
   if (score.type === "mate") {
     const m = score.value * sign; // normalise: positive => White is mating
-    fill.style.height = m > 0 ? "100%" : "0%";
+    fill.style.width = m > 0 ? "100%" : "0%";
     label.textContent = (m < 0 ? "-M" : "M") + Math.abs(m);
     return;
   }
@@ -428,7 +428,7 @@ function renderEvalBar(score, side) {
   const cpWhite = score.value * sign;
   const clamped = Math.max(-1000, Math.min(1000, cpWhite));
   const pct = (clamped + 1000) / 2000 * 100; // [-1000,1000] -> [0,100]
-  fill.style.height = pct.toFixed(1) + "%";
+  fill.style.width = pct.toFixed(1) + "%";
 
   // Label is normalised to White's perspective so it agrees with the bar.
   const pawns = cpWhite / 100;
@@ -1036,14 +1036,10 @@ function wire() {
     }
   });
 
-  // UCI console collapse / clear
-  $("#console-toggle").addEventListener("click", () => {
-    const btn = $("#console-toggle");
-    const open = btn.getAttribute("aria-expanded") === "true";
-    btn.setAttribute("aria-expanded", String(!open));
-    uciLogEl.classList.toggle("collapsed", open);
-  });
-  $("#console-clear").addEventListener("click", () => {
+  // UCI console clear. It lives inside the panel's <summary>, so stop the click from toggling it.
+  $("#console-clear").addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     uciLogEl.innerHTML = "";
   });
 
@@ -1057,10 +1053,21 @@ function wire() {
   });
 }
 
+// Remember which collapsible debugging panels are open across reloads.
+function wireCollapsibles() {
+  document.querySelectorAll("details.collapsible").forEach((d) => {
+    const key = "sc-open-" + d.id;
+    const saved = localStorage.getItem(key);
+    if (saved !== null) d.open = saved === "1";
+    d.addEventListener("toggle", () => localStorage.setItem(key, d.open ? "1" : "0"));
+  });
+}
+
 // --- boot ---
 function init() {
   applyTheme(currentTheme()); // sync the theme-toggle label to the pre-painted theme
   syncSoundButton();
+  wireCollapsibles();
   buildBoard();
   populatePlayerSelects();
   wire();

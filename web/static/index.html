@@ -28,8 +28,17 @@
   </header>
 
   <div class="app">
-    <!-- ===================== LEFT: setup & debug ===================== -->
-    <aside class="col col-left">
+    <!-- ===================== BOARD ===================== -->
+    <main class="board-col">
+      <div id="board-wrap" class="board-wrap">
+        <div id="board" class="board"></div>
+        <!-- promotion picker is injected here when needed -->
+      </div>
+      <div class="status-line" id="status-line">No game.</div>
+    </main>
+
+    <!-- ===================== SIDEBAR ===================== -->
+    <aside class="sidebar">
       <section class="panel">
         <h2 class="panel-title">Match</h2>
 
@@ -71,72 +80,54 @@
         </div>
       </section>
 
-      <section class="panel">
-        <h2 class="panel-title">Search limits</h2>
-        <div class="field-inline">
-          <div class="field">
-            <label for="opt-movetime">Move time (ms)</label>
-            <input id="opt-movetime" type="number" min="0" step="50" placeholder="auto">
-          </div>
-          <div class="field">
-            <label for="opt-depth">Depth</label>
-            <input id="opt-depth" type="number" min="0" step="1" placeholder="auto">
-          </div>
-        </div>
-        <p class="muted small">Blank / 0 lets the engine manage its own time.</p>
-      </section>
-
-      <section class="panel panel-console">
-        <div class="console-head">
-          <button id="console-toggle" class="console-toggle" aria-expanded="true">
-            <span class="caret">▾</span> UCI console
-          </button>
-          <button id="console-clear" class="btn btn-tiny">clear</button>
-        </div>
-        <div id="uci-log" class="uci-log" aria-live="off"></div>
-      </section>
-    </aside>
-
-    <!-- ===================== CENTER: board ===================== -->
-    <main class="col col-center">
-      <div id="board-wrap" class="board-wrap">
-        <div id="board" class="board"></div>
-        <!-- promotion picker is injected here when needed -->
-      </div>
-    </main>
-
-    <!-- ===================== RIGHT: analysis & history ===================== -->
-    <aside class="col col-right">
-      <div class="analysis">
-        <div class="evalbar" id="evalbar" title="Evaluation">
-          <div class="evalbar-fill" id="evalbar-fill"></div>
-          <span class="evalbar-label" id="evalbar-label">0.00</span>
-        </div>
-
-        <div class="analysis-main">
-          <section class="panel info-panel">
-            <h2 class="panel-title">Engine info</h2>
-            <div class="info-grid">
-              <div><span class="info-k">depth</span><span class="info-v" id="i-depth">—</span></div>
-              <div><span class="info-k">score</span><span class="info-v" id="i-score">—</span></div>
-              <div><span class="info-k">nodes</span><span class="info-v" id="i-nodes">—</span></div>
-              <div><span class="info-k">nps</span><span class="info-v" id="i-nps">—</span></div>
-              <div><span class="info-k">time</span><span class="info-v" id="i-time">—</span></div>
-            </div>
-            <div class="info-pv">
-              <span class="info-k">pv</span>
-              <code class="info-pv-moves" id="i-pv">—</code>
-            </div>
-          </section>
-
-          <div class="status-line" id="status-line">No game.</div>
-        </div>
-      </div>
-
       <section class="panel panel-moves">
         <h2 class="panel-title">Moves</h2>
         <div class="movelist" id="movelist"></div>
       </section>
+
+      <!-- Analysis (collapsible) -->
+      <details class="panel collapsible" id="panel-analysis" open>
+        <summary class="panel-title">Analysis</summary>
+        <div class="collapsible-body">
+          <div class="analysis">
+            <div class="evalbar" id="evalbar" title="Evaluation">
+              <div class="evalbar-fill" id="evalbar-fill"></div>
+              <span class="evalbar-label" id="evalbar-label">0.00</span>
+            </div>
+            <div class="analysis-main">
+              <div class="info-grid">
+                <div><span class="info-k">depth</span><span class="info-v" id="i-depth">—</span></div>
+                <div><span class="info-k">score</span><span class="info-v" id="i-score">—</span></div>
+                <div><span class="info-k">nodes</span><span class="info-v" id="i-nodes">—</span></div>
+                <div><span class="info-k">nps</span><span class="info-v" id="i-nps">—</span></div>
+                <div><span class="info-k">time</span><span class="info-v" id="i-time">—</span></div>
+              </div>
+              <div class="info-pv">
+                <span class="info-k">pv</span>
+                <code class="info-pv-moves" id="i-pv">—</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Search limits (collapsible) -->
+      <details class="panel collapsible" id="panel-limits">
+        <summary class="panel-title">Search limits</summary>
+        <div class="collapsible-body">
+          <div class="field-inline">
+            <div class="field">
+              <label for="opt-movetime">Move time (ms)</label>
+              <input id="opt-movetime" type="number" min="0" step="50" placeholder="auto">
+            </div>
+            <div class="field">
+              <label for="opt-depth">Depth</label>
+              <input id="opt-depth" type="number" min="0" step="1" placeholder="auto">
+            </div>
+          </div>
+          <p class="muted small">Blank / 0 lets the engine manage its own time.</p>
+        </div>
+      </details>
 
       <section class="panel">
         <h2 class="panel-title">FEN</h2>
@@ -146,6 +137,16 @@
           <button id="btn-copy-fen" class="btn">Copy</button>
         </div>
       </section>
+
+      <!-- UCI console (collapsible) -->
+      <details class="panel collapsible" id="panel-console">
+        <summary class="panel-title">UCI console
+          <button id="console-clear" class="btn btn-tiny summary-action">clear</button>
+        </summary>
+        <div class="collapsible-body">
+          <div id="uci-log" class="uci-log" aria-live="off"></div>
+        </div>
+      </details>
     </aside>
   </div>
 

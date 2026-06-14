@@ -136,17 +136,39 @@ a { color: var(--accent); }
 
 .app {
   display: grid;
-  grid-template-columns: 290px minmax(360px, 1fr) 340px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 22px;
   align-items: start;
-  max-width: 1480px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 22px;
 }
 
-.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.board-col { display: flex; flex-direction: column; align-items: center; gap: 14px; min-width: 0; }
+.sidebar { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
-.col-center { align-items: center; }
+/* collapsible panels (native <details>) */
+details.collapsible { padding: 0; }
+details.collapsible > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  margin: 0; /* override the .panel-title margin */
+  user-select: none;
+}
+details.collapsible > summary::-webkit-details-marker { display: none; }
+details.collapsible > summary::before {
+  content: "▾";
+  font-size: 0.7rem;
+  transition: transform 0.15s;
+}
+details.collapsible:not([open]) > summary::before { transform: rotate(-90deg); }
+details.collapsible > summary:hover { color: var(--text); }
+.summary-action { margin-left: auto; }
+.collapsible-body { padding: 0 16px 16px; }
 
 /* ------------------------------------------------------------------ panels */
 
@@ -358,39 +380,41 @@ input::placeholder { color: var(--text-light); opacity: 0.7; }
 
 /* ------------------------------------------------------------ analysis col */
 
-.analysis { display: flex; gap: 12px; align-items: stretch; }
+.analysis { display: flex; flex-direction: column; gap: 12px; }
 
+/* horizontal eval bar: white fills from the left, more fill = better for White */
 .evalbar {
   position: relative;
-  width: 22px;
+  width: 100%;
+  height: 22px;
   border-radius: 5px;
   overflow: hidden;
   background: var(--eval-dark);
   border: 1px solid var(--divider);
-  flex: 0 0 auto;
 }
 .evalbar-fill {
   position: absolute;
   left: 0;
-  bottom: 0;
-  width: 100%;
-  height: 50%;
+  top: 0;
+  height: 100%;
+  width: 50%;
   background: var(--eval-light);
-  transition: height 0.25s ease;
+  transition: width 0.25s ease;
 }
 .evalbar-label {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 4px;
-  text-align: center;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.62rem;
   color: #888;
   z-index: 2;
 }
 
-.analysis-main { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.analysis-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
 .info-panel { padding: 14px; }
 .info-grid {
@@ -414,6 +438,8 @@ input::placeholder { color: var(--text-light); opacity: 0.7; }
 }
 
 .status-line {
+  width: 100%;
+  max-width: 620px;
   font-size: 0.92rem;
   padding: 10px 12px;
   border-radius: 6px;
@@ -443,23 +469,6 @@ input::placeholder { color: var(--text-light); opacity: 0.7; }
 
 /* ----------------------------------------------------------- UCI console */
 
-.panel-console { display: flex; flex-direction: column; }
-.console-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.console-toggle {
-  font-family: inherit;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 600;
-  color: var(--text-light);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-}
-.console-toggle .caret { display: inline-block; transition: transform 0.15s; }
-.console-toggle[aria-expanded="false"] .caret { transform: rotate(-90deg); }
-
 .uci-log {
   font-family: var(--font-mono);
   font-size: 0.72rem;
@@ -471,7 +480,6 @@ input::placeholder { color: var(--text-light); opacity: 0.7; }
   max-height: 240px;
   overflow-y: auto;
 }
-.uci-log.collapsed { display: none; }
 .uci-line { display: block; white-space: pre-wrap; word-break: break-all; }
 .uci-line.send .u-arrow { color: var(--accent); }
 .uci-line.recv .u-arrow { color: var(--text-light); }
@@ -502,8 +510,7 @@ input::placeholder { color: var(--text-light); opacity: 0.7; }
 
 /* --------------------------------------------------------------- responsive */
 
-@media (max-width: 1080px) {
+@media (max-width: 980px) {
   .app { grid-template-columns: 1fr; }
-  .col-center { order: -1; }
   .board-wrap { margin: 0 auto; }
 }
