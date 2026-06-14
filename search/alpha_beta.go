@@ -223,55 +223,84 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		}
 	}
 
-	// Generate pseudolegal moves and order them: captures first by MVV-LVA, with the TT move ahead of
-	// everything. Legality is checked lazily — MakeMove returns false when a move leaves our own king
-	// in check, which is cheaper than fully filtering the list up front.
-	moves := pos.MovesPseudolegal()
-	moves.OrderMVVLVA()
-	if ttMove != position.NoMove {
-		moves.PrioritizeMove(ttMove)
-	}
-
 	bestScore := position.NoEval
 	bestMove := position.NoMove
 	legalCount := 0
+	cutoff := false
 
 	// TODO: doesn't yet understand draw by threefold repetition
 
 	var childPV pvList
 
-	for _, move := range moves.AsSlice() {
-		if !pos.MakeMove(move) {
-			continue // illegal: this move left our king in check
-		}
+	// Stage 1: search the transposition-table move before generating anything. During iterative
+	// deepening it is frequently the best move and produces an immediate cutoff, in which case the
+	// whole move list never has to be generated or ordered. Equal hashes guarantee the stored move's
+	// prior-state bits are valid here, so MakeMove/UndoMove round-trip correctly.
+	if ttMove != position.NoMove && pos.MakeMove(ttMove) {
 		legalCount++
-
 		childPV.clear()
 		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
-		pos.UndoMove(move)
+		pos.UndoMove(ttMove)
 
-		if score > bestScore {
-			bestScore = score
-			bestMove = move
-			pv.catenate(move, &childPV)
-		}
+		bestScore = score
+		bestMove = ttMove
+		pv.catenate(ttMove, &childPV)
 		if score > alpha {
 			alpha = score
 		}
 		if alpha >= beta {
-			break // beta cutoff: the opponent won't allow this line
+			cutoff = true
 		}
+	}
 
-		if time.Since(s.startTime) > s.options.MoveTime {
-			atomic.StoreInt32(&s.stop, 1)
-		}
-		// Honour an explicit node limit (`go nodes N`); the default is math.MaxUint, so it never fires
-		// unless a limit was actually requested.
-		if uint(s.nodeCount) >= s.options.Nodes {
-			atomic.StoreInt32(&s.stop, 1)
-		}
-		if s.stopped() {
-			return alpha // aborted: don't store a partial result
+	if !cutoff && s.stopped() {
+		return alpha
+	}
+
+	// Stage 2: generate, order (captures first by MVV-LVA) and search the remaining moves. Legality is
+	// checked lazily — MakeMove returns false when a move leaves our own king in check, which is
+	// cheaper than fully filtering the list up front.
+	if !cutoff {
+		moves := pos.MovesPseudolegal()
+		moves.OrderMVVLVA()
+
+		for _, move := range moves.AsSlice() {
+			if ttMove != position.NoMove &&
+				move.From() == ttMove.From() && move.To() == ttMove.To() && move.Promotion() == ttMove.Promotion() {
+				continue // already searched in stage 1
+			}
+			if !pos.MakeMove(move) {
+				continue // illegal: this move left our king in check
+			}
+			legalCount++
+
+			childPV.clear()
+			score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
+			pos.UndoMove(move)
+
+			if score > bestScore {
+				bestScore = score
+				bestMove = move
+				pv.catenate(move, &childPV)
+			}
+			if score > alpha {
+				alpha = score
+			}
+			if alpha >= beta {
+				break // beta cutoff: the opponent won't allow this line
+			}
+
+			if time.Since(s.startTime) > s.options.MoveTime {
+				atomic.StoreInt32(&s.stop, 1)
+			}
+			// Honour an explicit node limit (`go nodes N`); the default is math.MaxUint, so it never
+			// fires unless a limit was actually requested.
+			if uint(s.nodeCount) >= s.options.Nodes {
+				atomic.StoreInt32(&s.stop, 1)
+			}
+			if s.stopped() {
+				return alpha // aborted: don't store a partial result
+			}
 		}
 	}
 
@@ -325,15 +354,18 @@ func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Posi
 		}
 	}
 
-	moves := pos.MovesPseudolegal()
+	// Out of check, generate only captures and promotions (what quiescence needs); in check, every
+	// move must be considered as a possible evasion.
+	var moves *position.MoveList
+	if inCheck {
+		moves = pos.MovesPseudolegal()
+	} else {
+		moves = pos.MovesCaptures()
+	}
 	moves.OrderMVVLVA()
 	legalCount := 0
 
 	for _, move := range moves.AsSlice() {
-		// Out of check, explore only captures and promotions; in check, try every evasion.
-		if !inCheck && move.Captured() == position.Empty && move.Promotion() == position.None {
-			continue
-		}
 		if !pos.MakeMove(move) {
 			continue
 		}
