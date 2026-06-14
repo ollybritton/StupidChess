@@ -21,6 +21,7 @@
   <header class="topbar">
     <div class="brand"><span class="brand-mark">♞</span> StupidChess <span class="brand-sub">engine lab</span></div>
     <div class="topbar-actions">
+      <button id="btn-open-newgame" class="icon-btn icon-btn-accent" title="Set up a new game">＋ New game</button>
       <button id="btn-flip" class="icon-btn" title="Flip board">⟲ Flip</button>
       <button id="btn-sound" class="icon-btn" title="Toggle sounds">♪ Sound</button>
       <button id="btn-theme" class="icon-btn" title="Toggle light / dark">☾ Dark</button>
@@ -32,43 +33,21 @@
     <main class="board-col">
       <div id="board-wrap" class="board-wrap">
         <div id="board" class="board"></div>
+        <!-- principal-variation arrows; lines are injected by app.js -->
+        <svg id="board-arrows" class="board-arrows" viewBox="0 0 8 8" aria-hidden="true">
+          <defs>
+            <marker id="pv-arrowhead" markerWidth="3" markerHeight="3" refX="2" refY="1.5" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L3,1.5 L0,3 Z" fill="context-stroke"></path>
+            </marker>
+          </defs>
+        </svg>
         <!-- promotion picker is injected here when needed -->
       </div>
       <div class="status-line" id="status-line">No game.</div>
     </main>
 
-    <!-- ===================== SIDEBAR ===================== -->
+    <!-- ===================== SIDEBAR (live game) ===================== -->
     <aside class="sidebar">
-      <!-- ---------- match starter (configure & start) ---------- -->
-      <section class="panel panel-setup">
-        <h2 class="panel-title">Set up a match</h2>
-
-        <div class="player-pick">
-          <label for="sel-white"><span class="side-dot white"></span> White</label>
-          <select id="sel-white"></select>
-          <p class="engine-desc" id="desc-white"></p>
-        </div>
-
-        <div class="swap-row">
-          <button id="btn-swap" class="btn btn-tiny" title="Swap White and Black">⇅ Swap sides</button>
-        </div>
-
-        <div class="player-pick">
-          <label for="sel-black"><span class="side-dot black"></span> Black</label>
-          <select id="sel-black"></select>
-          <p class="engine-desc" id="desc-black"></p>
-        </div>
-
-        <div class="field">
-          <label for="new-fen">Start position <span class="muted">(FEN, optional)</span></label>
-          <input id="new-fen" type="text" placeholder="standard start" spellcheck="false" autocomplete="off">
-        </div>
-        <button id="btn-new-game" class="btn btn-primary">Start match</button>
-      </section>
-
-      <!-- ---------- live game (play / spectate) ---------- -->
-      <div class="sidebar-divider"><span>Game</span></div>
-
       <section class="panel">
         <h2 class="panel-title">Engine play</h2>
         <div class="field">
@@ -152,6 +131,42 @@
         </div>
       </details>
     </aside>
+  </div>
+
+  <!-- ===================== NEW GAME MODAL ===================== -->
+  <div id="modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Set up a match">
+      <div class="modal-head">
+        <h2 class="panel-title">Set up a match</h2>
+        <button id="modal-close" class="icon-btn" title="Close">✕</button>
+      </div>
+
+      <div class="player-pick">
+        <label for="sel-white"><span class="side-dot white"></span> White</label>
+        <select id="sel-white"></select>
+        <p class="engine-desc" id="desc-white"></p>
+      </div>
+
+      <div class="swap-row">
+        <button id="btn-swap" class="btn btn-tiny" title="Swap White and Black">⇅ Swap sides</button>
+      </div>
+
+      <div class="player-pick">
+        <label for="sel-black"><span class="side-dot black"></span> Black</label>
+        <select id="sel-black"></select>
+        <p class="engine-desc" id="desc-black"></p>
+      </div>
+
+      <div class="field">
+        <label for="new-fen">Start position <span class="muted">(FEN, optional)</span></label>
+        <input id="new-fen" type="text" placeholder="standard start" spellcheck="false" autocomplete="off">
+      </div>
+
+      <div class="modal-actions">
+        <button id="btn-cancel-game" class="btn">Cancel</button>
+        <button id="btn-new-game" class="btn btn-primary">Start match</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

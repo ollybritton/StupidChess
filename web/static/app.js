@@ -402,6 +402,52 @@ function renderInfo() {
   $("#i-pv").textContent = info && info.pv && info.pv.length ? info.pv.join(" ") : "—";
 
   renderEvalBar(info ? info.score : null, side);
+  renderArrows();
+}
+
+/* ---- principal-variation arrows ---- */
+
+const arrowsEl = $("#board-arrows");
+const SVGNS = "http://www.w3.org/2000/svg";
+
+// Centre of a square in the board's 8x8 coordinate space, accounting for board flip.
+function squareCenter(name) {
+  const f = FILES.indexOf(name[0]);
+  const r = RANKS.indexOf(name[1]);
+  if (f < 0 || r < 0) return null;
+  const col = ui.flipped ? 7 - f : f;
+  const row = ui.flipped ? r : 7 - r;
+  return { x: col + 0.5, y: row + 0.5 };
+}
+
+// Draw arrows for the principal variation of the engine currently thinking. The PV only applies to the
+// board on screen while that engine is searching it, so arrows are cleared at all other times.
+function renderArrows() {
+  arrowsEl.querySelectorAll("line").forEach((l) => l.remove());
+
+  if (!game.thinking) return;
+  const info = ui.lastInfo[game.thinking];
+  if (!info || !Array.isArray(info.pv) || !info.pv.length) return;
+
+  info.pv.slice(0, 4).forEach((uci, i) => {
+    if (typeof uci !== "string" || uci.length < 4) return;
+    const from = squareCenter(uci.slice(0, 2));
+    const to = squareCenter(uci.slice(2, 4));
+    if (!from || !to) return;
+
+    // stop short of the destination centre so the arrowhead sits nicely on the square
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+
+    const line = document.createElementNS(SVGNS, "line");
+    line.setAttribute("x1", from.x);
+    line.setAttribute("y1", from.y);
+    line.setAttribute("x2", to.x - (dx / len) * 0.32);
+    line.setAttribute("y2", to.y - (dy / len) * 0.32);
+    line.setAttribute("class", "pv-arrow" + (i === 0 ? " primary" : ""));
+    line.style.opacity = i === 0 ? "0.8" : String(Math.max(0.2, 0.45 - i * 0.1));
+    arrowsEl.appendChild(line);
+  });
 }
 
 // Eval bar: white fills from bottom. Score is from `side`'s perspective; we
@@ -950,8 +996,28 @@ function renderEngineDescs() {
   $("#desc-black").textContent = engineInfo($("#sel-black").value).description;
 }
 
+// New game modal (the match setup lives here, overlaid on the board).
+function openNewGame() { $("#modal-backdrop").classList.remove("hidden"); }
+function closeNewGame() { $("#modal-backdrop").classList.add("hidden"); }
+
+// Cap the sidebar to the board's height so the two columns line up; it scrolls internally. On the
+// narrow single-column layout the cap is removed so the sidebar flows naturally.
+function syncSidebarHeight() {
+  const sidebar = document.querySelector(".sidebar");
+  const boardCol = document.querySelector(".board-col");
+  if (!sidebar || !boardCol) return;
+  sidebar.style.height = window.innerWidth <= 980 ? "" : boardCol.offsetHeight + "px";
+}
+
 function wire() {
-  // New game
+  // New game: open the modal; "Start match" inside it posts and closes.
+  $("#btn-open-newgame").addEventListener("click", openNewGame);
+  $("#modal-close").addEventListener("click", closeNewGame);
+  $("#btn-cancel-game").addEventListener("click", closeNewGame);
+  $("#modal-backdrop").addEventListener("click", (e) => {
+    if (e.target === $("#modal-backdrop")) closeNewGame();
+  });
+
   $("#btn-new-game").addEventListener("click", () => {
     const fenRaw = $("#new-fen").value.trim();
     post("new_game", {
@@ -959,6 +1025,7 @@ function wire() {
       black: $("#sel-black").value,
       fen: fenRaw ? fenRaw : null,
     });
+    closeNewGame();
   });
 
   // Update the descriptions when a player is changed.
@@ -1002,6 +1069,7 @@ function wire() {
     closePromotion();
     buildBoard();   // rebuild square order
     renderBoard();
+    renderArrows(); // arrows depend on orientation
   });
 
   // Theme toggle (light / dark), persisted.
@@ -1043,13 +1111,14 @@ function wire() {
     uciLogEl.innerHTML = "";
   });
 
-  // Keep promotion picker / selection sane on resize.
+  // Keep promotion picker / selection sane on resize, and re-fit the sidebar to the board.
   window.addEventListener("resize", () => {
     if (ui.pendingPromo) { closePromotion(); clearSelection(); }
+    syncSidebarHeight();
   });
-  // Escape clears selection / closes picker.
+  // Escape closes the new-game modal / picker and clears selection.
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { closePromotion(); clearSelection(); }
+    if (e.key === "Escape") { closeNewGame(); closePromotion(); clearSelection(); }
   });
 }
 
@@ -1073,6 +1142,7 @@ function init() {
   wire();
   renderAll();
   connect();
+  requestAnimationFrame(syncSidebarHeight); // fit the sidebar to the board once laid out
 }
 
 document.addEventListener("DOMContentLoaded", init);
