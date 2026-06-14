@@ -11,6 +11,7 @@ import (
 // consequences of making that move, i.e. a simple material count or the move that makes the board most
 // look like a horse.
 type SimpleEngine struct {
+	noOptions
 	name        string
 	author      string
 	description string

@@ -29,6 +29,7 @@ type stateEvent struct {
 	Players    playersInfo         `json:"players"`
 	Thinking   *string             `json:"thinking"`
 	Mode       string              `json:"mode"`
+	OwnBook    bool                `json:"ownBook"`
 	Flipped    bool                `json:"flipped"`
 }
 

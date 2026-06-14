@@ -233,13 +233,14 @@ func (s *Server) handleSetFEN(r *http.Request) error {
 
 func (s *Server) handleSetOptions(r *http.Request) error {
 	var body struct {
-		MoveTime *int `json:"movetime"`
-		Depth    *int `json:"depth"`
+		MoveTime *int  `json:"movetime"`
+		Depth    *int  `json:"depth"`
+		OwnBook  *bool `json:"ownBook"`
 	}
 	if err := decode(r, &body); err != nil {
 		return err
 	}
-	return s.game.SetOptions(body.MoveTime, body.Depth)
+	return s.game.SetOptions(body.MoveTime, body.Depth, body.OwnBook)
 }
 
 // ---- small helpers ---------------------------------------------------------

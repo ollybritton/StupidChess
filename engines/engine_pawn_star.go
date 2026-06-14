@@ -8,6 +8,7 @@ import (
 )
 
 type EnginePawnStar struct {
+	noOptions
 	searcher search.Searcher
 	prepared bool
 }

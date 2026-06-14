@@ -18,6 +18,7 @@ import (
 // It works by setting Stockfish's MultiPV to the number of legal moves so a single search ranks them
 // all, then taking the move at the lowest rank. If Stockfish isn't installed it falls back to random.
 type EngineWorstfish struct {
+	noOptions
 	oracle *uciclient.GUISession
 }
 

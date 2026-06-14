@@ -12,6 +12,7 @@ import (
 const sprinterDepth = 3
 
 type EngineSprinter struct {
+	noOptions
 	prevPiece position.Piece
 }
 

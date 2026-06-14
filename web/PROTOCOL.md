@@ -47,6 +47,7 @@ should treat this as the single source of truth and re-render from it.
   "players": { "white": "human", "black": "tryhard" },  // "human" or an engine name
   "thinking": null,                  // "w" | "b" | null — which side's engine is currently searching
   "mode": "auto",                    // "auto" | "manual" — engine-vs-engine autoplay mode
+  "ownBook": true,                   // whether book-capable engines use their opening book
   "flipped": false                   // hint only; the frontend owns board orientation
 }
 ```
@@ -96,7 +97,7 @@ events, NOT in the POST response. So after a successful POST the frontend just w
 | `POST /api/control` | `{ "mode": "auto" }` | Set engine-vs-engine autoplay mode: `"auto"` plays both engines through to the end; `"manual"` waits for `step`. |
 | `POST /api/step` | `{}` | In an engine-vs-engine game, make the side-to-move engine play exactly one move. |
 | `POST /api/go` | `{}` | Force the side-to-move engine (if any) to think and move now. Works for human-vs-engine too (hint/“move now”). |
-| `POST /api/set_options` | `{ "movetime": 1000, "depth": 6 }` | Set search limits sent to engines. Either field optional. `movetime` in ms. `0`/absent means “let the engine manage its own time”. |
+| `POST /api/set_options` | `{ "movetime": 1000, "depth": 6, "ownBook": true }` | Set options sent to engines. All fields optional. `movetime` in ms (`0`/absent = let the engine manage its own time); `ownBook` toggles the opening book on book-capable engines (e.g. tryhard) via UCI `setoption`. |
 | `POST /api/set_fen` | `{ "fen": "..." }` | Load a position from FEN, keeping the current players. |
 
 ## UI requirements (summary for the frontend)

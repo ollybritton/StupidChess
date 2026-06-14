@@ -50,6 +50,7 @@ type Game struct {
 
 	mode    string // "auto" | "manual" (engine-vs-engine autoplay)
 	options search.SearchOptions
+	ownBook bool // send engines OwnBook=true so book-capable engines (tryhard) use their opening book
 
 	epoch        int
 	searching    bool
@@ -72,6 +73,7 @@ func NewGame(specs map[string]EngineSpec, emit func(ev any)) *Game {
 		startFEN: position.StartingPosition,
 		mode:     "auto",
 		options:  options,
+		ownBook:  true,
 		white:    playerSlot{name: "human"},
 		black:    playerSlot{name: "human"},
 	}
@@ -195,6 +197,7 @@ func (g *Game) stateEvent() stateEvent {
 		Players:    playersInfo{White: g.white.name, Black: g.black.name},
 		Thinking:   thinking,
 		Mode:       g.mode,
+		OwnBook:    g.ownBook,
 		Flipped:    false,
 	}
 }
@@ -305,6 +308,9 @@ func (g *Game) makeSlot(name string, color position.Color) (playerSlot, error) {
 		sess.Close()
 		return playerSlot{}, fmt.Errorf("engine %q not ready: %w", name, err)
 	}
+
+	// Apply the opening-book setting; engines without the option simply ignore it.
+	sess.SetOption("OwnBook", strconv.FormatBool(g.ownBook))
 
 	return playerSlot{name: name, sess: sess}, nil
 }
@@ -460,7 +466,7 @@ func (g *Game) StepOrGo() error {
 	})
 }
 
-func (g *Game) SetOptions(movetime, depth *int) error {
+func (g *Game) SetOptions(movetime, depth *int, ownBook *bool) error {
 	return g.doSync(func() error {
 		if movetime != nil {
 			if *movetime > 0 {
@@ -471,6 +477,15 @@ func (g *Game) SetOptions(movetime, depth *int) error {
 		}
 		if depth != nil && *depth > 0 {
 			g.options.Depth = uint(*depth)
+		}
+		if ownBook != nil {
+			g.ownBook = *ownBook
+			for _, slot := range []playerSlot{g.white, g.black} {
+				if slot.sess != nil {
+					slot.sess.SetOption("OwnBook", strconv.FormatBool(g.ownBook))
+				}
+			}
+			g.broadcast() // reflect the change in the UI
 		}
 		return nil
 	})

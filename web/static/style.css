@@ -272,6 +272,9 @@ details.collapsible > summary:hover { color: var(--text); }
 }
 .swap-row { display: flex; justify-content: center; margin: 2px 0 12px; }
 
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer; margin-top: 10px; }
+.check-row input { width: auto; margin: 0; }
+
 .muted { color: var(--text-light); }
 .small { font-size: 0.78rem; }
 .hidden { display: none !important; }

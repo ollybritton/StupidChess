@@ -2,6 +2,7 @@ package engines
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
@@ -10,6 +11,7 @@ import (
 type EngineTryHard struct {
 	searcher search.Searcher
 	prepared bool
+	useBook  bool
 }
 
 func NewEngineTryHard() *EngineTryHard {
@@ -23,7 +25,20 @@ func NewEngineTryHard() *EngineTryHard {
 			position.EvalComplex,
 			position.EvalComplex,
 		),
+		useBook: true,
 	}
+}
+
+// Options exposes the opening-book toggle as the standard UCI "OwnBook" option.
+func (e *EngineTryHard) Options() []EngineOption {
+	return []EngineOption{{Name: "OwnBook", Type: "check", Default: "true"}}
+}
+
+func (e *EngineTryHard) SetOption(name, value string) error {
+	if strings.EqualFold(name, "OwnBook") {
+		e.useBook = strings.EqualFold(value, "true")
+	}
+	return nil
 }
 
 func (e *EngineTryHard) Name() string {
@@ -63,6 +78,17 @@ func (e *EngineTryHard) NewGame() error {
 }
 
 func (e *EngineTryHard) Go(pos *position.Position, options search.SearchOptions) error {
+	// Play instantly from the opening book while still in known theory.
+	if e.useBook {
+		if uci, ok := defaultBook.lookup(pos); ok {
+			if _, legal := bookLegalMove(pos, uci); legal {
+				fmt.Println("info string book move")
+				fmt.Println("bestmove", uci)
+				return nil
+			}
+		}
+	}
+
 	e.searcher.Requests() <- search.NewRequest(pos, options)
 
 	return nil

@@ -34,6 +34,7 @@ const game = {
   players: { white: "human", black: "human" },
   thinking: null,
   mode: "auto",
+  ownBook: true,
 };
 
 // Frontend-only / derived UI state.
@@ -528,6 +529,10 @@ function renderControls() {
     b.classList.toggle("active", b.dataset.mode === game.mode);
   });
 
+  // opening-book checkbox (don't fight the user while focused)
+  const book = $("#opt-ownbook");
+  if (document.activeElement !== book) book.checked = game.ownBook;
+
   // Engine-vs-engine? (both sides are engines)
   const eve = !isHuman(game.players.white) && !isHuman(game.players.black);
   const thinking = !!game.thinking;
@@ -842,6 +847,7 @@ function onState(msg) {
     : game.players;
   game.thinking = msg.thinking === "w" || msg.thinking === "b" ? msg.thinking : null;
   game.mode = msg.mode === "manual" ? "manual" : "auto";
+  game.ownBook = msg.ownBook !== false;
 
   // selection no longer valid if it isn't a current source square
   if (ui.selected && !game.dests[ui.selected]) ui.selected = null;
@@ -1062,6 +1068,9 @@ function wire() {
   };
   $("#opt-movetime").addEventListener("change", sendOptions);
   $("#opt-depth").addEventListener("change", sendOptions);
+  $("#opt-ownbook").addEventListener("change", () => {
+    post("set_options", { ownBook: $("#opt-ownbook").checked });
+  });
 
   // Board flip (frontend only — never hits the server)
   $("#btn-flip").addEventListener("click", () => {

@@ -48,6 +48,8 @@ func (s *EngineSession) Handle(commandLine string) error {
 		handler = s.handleCommandIsReady
 	case "position":
 		handler = s.handleCommandPosition
+	case "setoption":
+		handler = s.handleCommandSetOption
 	case "go":
 		handler = s.handleCommandGo
 	case "stop":
@@ -102,7 +104,9 @@ func (s *EngineSession) handleCommandUci(arguments []string) error {
 	fmt.Printf("id name %s\n", s.engine.Name())
 	fmt.Printf("id author %s\n", s.engine.Author())
 
-	// TODO: implement options being printed out
+	for _, opt := range s.engine.Options() {
+		fmt.Printf("option name %s type %s default %s\n", opt.Name, opt.Type, opt.Default)
+	}
 
 	seed := time.Now().Unix()
 	fmt.Println("info string rng seed", seed)
@@ -344,6 +348,42 @@ func (s *EngineSession) handleCommandNewGame(arguments []string) error {
 	}
 
 	return nil
+}
+
+func (s *EngineSession) handleCommandSetOption(arguments []string) error {
+	name, value := parseSetOption(arguments)
+	if name == "" {
+		return nil
+	}
+	return s.engine.SetOption(name, value)
+}
+
+// parseSetOption pulls the name and value out of a "setoption name <name> value <value>" command. Both
+// can in principle contain spaces, so it splits on the literal keywords rather than fixed positions.
+func parseSetOption(args []string) (name, value string) {
+	nameIdx, valueIdx := -1, -1
+	for i, a := range args {
+		switch a {
+		case "name":
+			if nameIdx == -1 {
+				nameIdx = i
+			}
+		case "value":
+			valueIdx = i
+		}
+	}
+
+	if nameIdx == -1 {
+		return "", ""
+	}
+
+	nameEnd := len(args)
+	if valueIdx != -1 {
+		nameEnd = valueIdx
+		value = strings.Join(args[valueIdx+1:], " ")
+	}
+	name = strings.Join(args[nameIdx+1:nameEnd], " ")
+	return name, value
 }
 
 func (s *EngineSession) handleCommandUnknown(arguments []string) error {
