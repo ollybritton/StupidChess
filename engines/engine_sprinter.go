@@ -2,11 +2,14 @@ package engines
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
 )
+
+// sprinterDepth is how many plies ahead the sprinter plans. Looking ahead lets it pick a move now that
+// sets up another long move later, rather than grabbing the single furthest move each turn.
+const sprinterDepth = 3
 
 type EngineSprinter struct {
 	prevPiece position.Piece
@@ -25,7 +28,7 @@ func (e *EngineSprinter) Author() string {
 }
 
 func (e *EngineSprinter) Description() string {
-	return "Plays the move that travels furthest across the board, and never moves the same piece twice in a row."
+	return "Covers as much board distance as possible over the game, planning ahead; never moves the same piece twice in a row."
 }
 
 func (e *EngineSprinter) NewGame() error {
@@ -37,66 +40,15 @@ func (e *EngineSprinter) Prepare() error {
 	return nil
 }
 
-func (e *EngineSprinter) Go(pos *position.Position, searchOptions search.SearchOptions) error {
-	legalMoves := pos.MovesLegal()
-
-	newMoves := pos.MovesLegal().Copy()
-	newMoves.Filter(func(m position.Move) bool {
-		return m.Moved().Colorless() != e.prevPiece
-	})
-
-	// Distance is calculated using the "maximum metric" (https://chris3606.github.io/GoRogue/articles/grid_components/measuring-distance.html#chebyshev-distance).
-
-	var bestMove position.Move
-	var bestDist float64 = -1
-
-	for _, move := range newMoves.AsSlice() {
-		from := move.From()
-		to := move.To()
-
-		fromRank := float64(from / 8)
-		fromFile := float64(from % 8)
-
-		toRank := float64(to / 8)
-		toFile := float64(to % 8)
-
-		dist := math.Max(fromRank-toRank, fromFile-toFile)
-
-		if dist > bestDist {
-			bestMove = move
-			bestDist = dist
-		}
-	}
-
-	if bestMove != position.Move(0) {
-		e.prevPiece = bestMove.Moved().Colorless()
-
-		fmt.Println("bestmove", bestMove.String())
+func (e *EngineSprinter) Go(pos *position.Position, _ search.SearchOptions) error {
+	move := bestSprinterMove(pos, sprinterDepth, e.prevPiece)
+	if move == position.NoMove {
+		fmt.Println("bestmove 0000")
 		return nil
 	}
 
-	for _, move := range legalMoves.AsSlice() {
-		from := move.From()
-		to := move.To()
-
-		fromRank := float64(from / 8)
-		fromFile := float64(from % 8)
-
-		toRank := float64(to / 8)
-		toFile := float64(to % 8)
-
-		dist := math.Max(fromRank-toRank, fromFile-toFile)
-
-		if dist > bestDist {
-			bestMove = move
-			bestDist = dist
-		}
-	}
-
-	e.prevPiece = bestMove.Moved().Colorless()
-
-	fmt.Println("bestmove", bestMove.String())
-
+	e.prevPiece = move.Moved().Colorless()
+	fmt.Println("bestmove", move.String())
 	return nil
 }
 

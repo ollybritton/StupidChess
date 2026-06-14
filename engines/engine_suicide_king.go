@@ -1,53 +1,30 @@
 package engines
 
 import (
-	"math"
-	"math/rand"
-
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
 )
+
+// suicideKingDepth is how many plies ahead the suicide king plans. Depth 3 (its move, the reply, its
+// next move) is enough to make preparatory moves — e.g. shift a blocking pawn now so the king can step
+// forward next move — while staying fast.
+const suicideKingDepth = 3
 
 func NewEngineSuicideKing() *SimpleEngine {
 	return NewSimpleEngine(
 		"suicide-king",
 		"Olly Britton",
-		"Marches its own king toward the enemy king, minimising the distance between them.",
-		func(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
-			return moveMinimiseKingDistance(pos)
+		"Walks its own king toward the enemy king, planning a few moves ahead to clear the way.",
+		func(pos *position.Position, _ search.SearchOptions) (position.Move, error) {
+			move := bestPositionalMove(pos, suicideKingDepth, pos.SideToMove, suicideKingEval)
+			return move, nil
 		},
 	)
 }
 
-func moveMinimiseKingDistance(pos *position.Position) (position.Move, error) {
-	legalMoves := pos.MovesLegal().AsSlice()
-
-	var bestMoves []position.Move
-	var lowestScore float64 = 100
-
-	for _, move := range legalMoves {
-		pos.MakeMove(move)
-
-		ourKing := pos.KingLocation[pos.SideToMove.Invert()]
-		theirKing := pos.KingLocation[pos.SideToMove]
-
-		pos.UndoMove(move)
-
-		ourKingRank := float64(ourKing / 8)
-		ourKingFile := float64(ourKing % 8)
-
-		theirKingRank := float64(theirKing / 8)
-		theirKingFile := float64(theirKing % 8)
-
-		score := math.Pow(theirKingFile-ourKingFile, 2) + math.Pow(theirKingRank-ourKingRank, 2)
-
-		if score == lowestScore {
-			bestMoves = append(bestMoves, move)
-		} else if score < lowestScore {
-			bestMoves = []position.Move{move}
-			lowestScore = score
-		}
-	}
-
-	return bestMoves[rand.Intn(len(bestMoves))], nil
+// suicideKingEval rewards the kings being close together (it is the same for either colour, since the
+// distance is symmetric). The look-ahead maximises it for the suicide king and assumes the opponent
+// tries to keep its king away.
+func suicideKingEval(pos *position.Position) int {
+	return -kingDistanceSquared(pos)
 }
