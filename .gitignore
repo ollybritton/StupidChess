@@ -93,10 +93,10 @@ hijack # used for debugging uci
 engine.sh # used for debugging uci
 engine.sh.x # used for debugging uci
 engine.sh.c # used for debugging uci
+# The built binary, anchored to the repo root so it does NOT also ignore the
+# cmd/stupidchess/ source directory.
 logs/
 profiles/
-stupidchess
+/stupidchess
 .vscode/*
 .vscode/settings.json
-
-stupidchess
