@@ -39,8 +39,9 @@
 
     <!-- ===================== SIDEBAR ===================== -->
     <aside class="sidebar">
-      <section class="panel">
-        <h2 class="panel-title">Match</h2>
+      <!-- ---------- match starter (configure & start) ---------- -->
+      <section class="panel panel-setup">
+        <h2 class="panel-title">Set up a match</h2>
 
         <div class="player-pick">
           <label for="sel-white"><span class="side-dot white"></span> White</label>
@@ -62,8 +63,11 @@
           <label for="new-fen">Start position <span class="muted">(FEN, optional)</span></label>
           <input id="new-fen" type="text" placeholder="standard start" spellcheck="false" autocomplete="off">
         </div>
-        <button id="btn-new-game" class="btn btn-primary">New game</button>
+        <button id="btn-new-game" class="btn btn-primary">Start match</button>
       </section>
+
+      <!-- ---------- live game (play / spectate) ---------- -->
+      <div class="sidebar-divider"><span>Game</span></div>
 
       <section class="panel">
         <h2 class="panel-title">Engine play</h2>
