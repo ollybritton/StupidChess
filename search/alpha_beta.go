@@ -87,63 +87,53 @@ func (s *AlphaBetaSearch) Root() error {
 
 		s.responses <- fmt.Sprintf("info string searching for %s/%s (inc %s)", s.options.MoveTime, timeRemaining, increment)
 
-		// Keep track of the best move found so far. This is outside the loop so that we can return the best move found
-		// if we are asked to stop searching at a particular depth.
+		// Best move/PV from the last FULLY COMPLETED depth. A depth interrupted by the clock is
+		// discarded, so the engine never commits to a half-searched (and possibly blundering) move.
 		bestMove := position.NoMove
 
-		// Generate legal moves and annotate them with the evaluation after they've taken place so we can improve
-		// move ordering in the search.
+		// Root moves: ordered by a quick static eval for the first iteration, then re-sorted by the
+		// real search scores on subsequent iterations (so the best move is searched first).
 		legalMoves := pos.MovesLegalWithEvaluation(position.EvalSimple)
+		if moves := legalMoves.AsSlice(); len(moves) > 0 {
+			bestMove = moves[0] // fallback so we always have a legal move, even if depth 1 is interrupted
+		}
 
-		// For loop for iterative deepening
+		// Iterative deepening.
 		for depth := uint(1); depth <= s.options.Depth; depth++ {
-			// Sort legal moves by the evaluation calculated above
 			legalMoves.Sort()
 
-			// Best score for a move found so far
 			bestScore := position.NoEval
-
-			// Alpha and beta bound the search window. Alpha is the best score we can already guarantee,
-			// beta the best the opponent can hold us to. They are initialised once per depth (not per
-			// move) so that alpha rises as better root moves are found and later moves are searched with
-			// a narrowing window. A previous version reset them inside the move loop, which disabled all
-			// pruning at the root.
+			// Alpha and beta bound the search window; initialised once per depth so alpha rises as
+			// better root moves are found and later moves are searched with a narrowing window.
 			alpha, beta := position.MinEval, position.MaxEval
+			depthBestMove := position.NoMove
+			interrupted := false
 
 			for i, move := range legalMoves.AsSlice() {
 				if s.stopped() {
+					interrupted = true
 					break
 				}
 
-				// Clear the child PV so it can be used again for this move
 				childPV.clear()
-
-				// Make move, evaluate score of this position, and then undo move.
 				pos.MakeMove(move)
 				score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
 				pos.UndoMove(move)
 
 				if s.stopped() {
+					interrupted = true
 					break
 				}
 
-				// Store evaluation of this move so that on the next iteration the move ordering is more effective
+				// Remember the score so the next iteration searches the best moves first.
 				move.SetEval(score)
 				legalMoves.Moves[i] = move
 
-				// If this is the best move we've seen so far...
 				if score > bestScore {
-					// Update bestScore to reflect this
 					bestScore = score
-
-					// Update the principle variation to use this move instead
+					depthBestMove = move
 					pv.clear()
 					pv.catenate(move, &childPV)
-
-					// Record this as the best move
-					bestMove = move
-
-					// Set alpha to this score
 					alpha = score
 				}
 
@@ -157,32 +147,30 @@ func (s *AlphaBetaSearch) Root() error {
 				)
 			}
 
-			if time.Since(s.startTime) > s.options.MoveTime {
+			// Discard an interrupted depth and keep the previous completed depth's best move.
+			if interrupted {
 				break
 			}
+			bestMove = depthBestMove
 
 			diff := time.Since(s.startTime)
-
 			if diff.Seconds() < 1 {
 				s.responses <- fmt.Sprintf(
 					"info depth %d score %s nodes %d time %d pv %s",
-					depth,
-					formatScore(bestScore),
-					s.nodeCount,
-					diff.Milliseconds(),
-					pv.String(),
+					depth, formatScore(bestScore), s.nodeCount, diff.Milliseconds(), pv.String(),
 				)
 			} else {
 				s.responses <- fmt.Sprintf(
 					"info depth %d score %s nodes %d nps %.0f time %d pv %s",
-					depth,
-					formatScore(bestScore),
-					s.nodeCount,
+					depth, formatScore(bestScore), s.nodeCount,
 					1000*(float64(s.nodeCount)/float64(diff.Milliseconds())),
-					diff.Milliseconds(),
-					pv.String(),
+					diff.Milliseconds(), pv.String(),
 				)
+			}
 
+			// Stop if we are out of time for this move.
+			if time.Since(s.startTime) > s.options.MoveTime {
+				break
 			}
 		}
 
@@ -192,106 +180,157 @@ func (s *AlphaBetaSearch) Root() error {
 	return nil
 }
 
+// maxQuiescencePly caps quiescence recursion as a safety valve against pathological capture/check
+// sequences. Captures alone are self-terminating (material is finite), but check chains may not be.
+const maxQuiescencePly = 64
+
 func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position) int16 {
 	s.nodeCount++
 
-	// If we're at depth 0, stop recursing and instead return a static evaluation of this position.
+	// At the horizon, resolve outstanding captures with a quiescence search before evaluating, so the
+	// engine never judges a position mid-exchange (which is what made it hang pieces).
 	if depth <= 0 {
-		if pos.SideToMove == s.us {
-			return position.ScoreFromPerspective(s.evalUs(pos), pos.SideToMove)
-		} else {
-			return position.ScoreFromPerspective(s.evalThem(pos), pos.SideToMove)
-		}
+		return s.quiesce(alpha, beta, ply, pos)
 	}
 
-	// Clear the principle variation
 	pv.clear()
 
-	// Generate all legal moves in this position
-	legalMoves := pos.MovesLegalWithEvaluation(position.EvalSimple)
-	legalMoves.Sort()
+	// Generate pseudolegal moves and order them (captures first by MVV-LVA). Legality is checked
+	// lazily: MakeMove returns false when a move leaves our own king in check, which is cheaper than
+	// fully filtering the list up front.
+	moves := pos.MovesPseudolegal()
+	moves.OrderMVVLVA()
 
-	// Initialise bestMove and bestScore to hold the best move found so far.
-	bestMove, bestScore := position.NoMove, position.NoEval
+	bestScore := position.NoEval
+	legalCount := 0
 
 	// TODO: doesn't yet understand draw by threefold repetition
 
 	var childPV pvList
 
-	for _, move := range legalMoves.AsSlice() {
-		childPV.clear()
+	for _, move := range moves.AsSlice() {
+		if !pos.MakeMove(move) {
+			continue // illegal: this move left our king in check
+		}
+		legalCount++
 
-		pos.MakeMove(move)
+		childPV.clear()
 		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
 		pos.UndoMove(move)
 
-		// If this is the best score we've found so far...
 		if score > bestScore {
-			// Update bestScore and bestMove to track this (might not need bestMove)
 			bestScore = score
-			bestMove = move
-			_ = bestMove
-
-			// Add this to the principle variation
 			pv.catenate(move, &childPV)
-
 		}
-
-		// If this is better than the best score we can guarantee so far, then update alpha to reflect this
 		if score > alpha {
 			alpha = score
 		}
-
-		// Beta cutoff:
-		// The opposing player can guarantee a better position for themselves, so there's no point pursuing this position.
 		if alpha >= beta {
-			break
-		}
-
-		// Print info if required
-		if time.Since(s.nextTime) >= time.Second {
-			//diff := time.Since(s.startTime)
-			//s.responses <- fmt.Sprintf("info time %v ndes %v nps %v", diff.Milliseconds(), s.nodeCount, s.nodeCount/int(diff.Seconds()))
-			s.nextTime = time.Now()
+			break // beta cutoff: the opponent won't allow this line
 		}
 
 		if time.Since(s.startTime) > s.options.MoveTime {
 			atomic.StoreInt32(&s.stop, 1)
 		}
-
-		// Honour an explicit node limit (`go nodes N`). The default is math.MaxUint, so this never fires
+		// Honour an explicit node limit (`go nodes N`); the default is math.MaxUint, so it never fires
 		// unless a limit was actually requested.
 		if uint(s.nodeCount) >= s.options.Nodes {
 			atomic.StoreInt32(&s.stop, 1)
 		}
-
-		// If required to stop early, return alpha since this is the best we can do.
 		if s.stopped() {
 			return alpha
 		}
-
 	}
 
-	// If we have no moves available, it's either checkmate or stalemate, so return values
-	// that reflect this.
-	if legalMoves.Len() == 0 {
+	// No legal move: checkmate if in check, otherwise stalemate.
+	if legalCount == 0 {
 		if pos.KingInCheck(pos.SideToMove) {
-			// Checkmate
-			return -30000 + int16(ply) + 1
+			return position.MinEval + int16(ply) + 1
 		}
-
-		// Stalemate
-		return 0 // TODO: return contempt value instead?
+		return 0 // stalemate; TODO: return a contempt value instead
 	}
 
 	return bestScore
 }
 
+// quiesce is a quiescence search. At the search horizon it keeps searching only captures and
+// promotions until the position is quiet, so the static evaluation is never applied in the middle of
+// an exchange. When the side to move is in check it instead searches every evasion, so a checkmate at
+// the horizon is not mistaken for a quiet, equal-material position.
+func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Position) int16 {
+	s.nodeCount++
+
+	if s.stopped() {
+		return alpha
+	}
+	if ply >= maxQuiescencePly {
+		return s.leafEval(pos)
+	}
+
+	inCheck := pos.KingInCheck(pos.SideToMove)
+
+	bestScore := position.NoEval
+	if !inCheck {
+		// Stand pat: we are never obliged to capture, so the static eval is a lower bound on our score.
+		bestScore = s.leafEval(pos)
+		if bestScore >= beta {
+			return bestScore
+		}
+		if bestScore > alpha {
+			alpha = bestScore
+		}
+	}
+
+	moves := pos.MovesPseudolegal()
+	moves.OrderMVVLVA()
+	legalCount := 0
+
+	for _, move := range moves.AsSlice() {
+		// Out of check, explore only captures and promotions; in check, try every evasion.
+		if !inCheck && move.Captured() == position.Empty && move.Promotion() == position.None {
+			continue
+		}
+		if !pos.MakeMove(move) {
+			continue
+		}
+		legalCount++
+
+		score := -s.quiesce(-beta, -alpha, ply+1, pos)
+		pos.UndoMove(move)
+
+		if score > bestScore {
+			bestScore = score
+		}
+		if score > alpha {
+			alpha = score
+		}
+		if alpha >= beta {
+			return bestScore
+		}
+	}
+
+	// In check with no legal move is checkmate.
+	if inCheck && legalCount == 0 {
+		return position.MinEval + int16(ply) + 1
+	}
+
+	return bestScore
+}
+
+// leafEval returns the static evaluation of a leaf from the side-to-move's perspective, using the
+// "us"/"them" evaluator depending on whose turn it is (identical for symmetric engines like tryhard).
+func (s *AlphaBetaSearch) leafEval(pos *position.Position) int16 {
+	if pos.SideToMove == s.us {
+		return position.ScoreFromPerspective(s.evalUs(pos), pos.SideToMove)
+	}
+	return position.ScoreFromPerspective(s.evalThem(pos), pos.SideToMove)
+}
+
 // formatScore renders an internal evaluation as a UCI "score" token. Near-extreme scores are forced
 // mates (checkmate returns roughly ±MaxEval offset by the ply at which it occurs), so they are
 // reported as "mate N" (N negative when we are the side being mated). Everything else is reported in
-// centipawns. The conversion is done here, in ints, because the old code printed score*100 directly as
-// an int16 and overflowed wildly on mate scores. One internal unit equals one pawn (see simpleEvalTable).
+// centipawns. The mate check is done in ints because the evaluation itself is int16 and mate scores
+// near ±MaxEval would otherwise be mishandled. The eval is already in centipawns (see simpleEvalTable).
 func formatScore(score int16) string {
 	const mateThreshold = position.MaxEval - 1000
 	s := int(score)
@@ -304,6 +343,7 @@ func formatScore(score int16) string {
 		// We are being mated.
 		return fmt.Sprintf("mate -%d", (int(position.MaxEval)+s+1)/2)
 	default:
-		return fmt.Sprintf("cp %d", s*100)
+		// The evaluation is already in centipawns (one pawn = 100), so report it directly.
+		return fmt.Sprintf("cp %d", s)
 	}
 }

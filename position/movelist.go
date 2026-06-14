@@ -71,6 +71,26 @@ func (l *MoveList) Sort() {
 	sort.Sort(sort.Reverse(l))
 }
 
+// mvvLvaValue gives small relative piece weights for move ordering (not the centipawn eval).
+var mvvLvaValue = map[Piece]int16{Pawn: 1, Knight: 3, Bishop: 3, Rook: 5, Queen: 9, King: 10}
+
+// OrderMVVLVA orders the moves for an alpha-beta search: winning captures first (most-valuable victim,
+// least-valuable attacker), then promotions, then quiet moves. Good ordering makes far more beta
+// cutoffs happen, which is what lets the search reach a useful depth. It works by stashing an ordering
+// key in each move's eval field, then sorting; callers that need the real evaluation must set it again.
+func (l *MoveList) OrderMVVLVA() {
+	for i := range l.Moves {
+		var key int16
+		if captured := l.Moves[i].Captured(); captured != Empty {
+			key = 1000 + mvvLvaValue[captured.Colorless()]*16 - mvvLvaValue[l.Moves[i].Moved().Colorless()]
+		} else if l.Moves[i].Promotion() != None {
+			key = 900
+		}
+		l.Moves[i].SetEval(key)
+	}
+	l.Sort()
+}
+
 // Filter removes moves in the move list according to a function that evaluates a move and says whether it is allowed in the
 // list or not.
 func (l *MoveList) Filter(allowedFunc func(Move) bool) {

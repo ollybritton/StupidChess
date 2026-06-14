@@ -15,9 +15,9 @@ func EvalPawnStarUs(pos *Position) int16 {
 		}
 
 		if pos.SideToMove == White && curr == WhitePawn {
-			overall += 15
+			overall += 1500
 		} else if pos.SideToMove == Black && curr == BlackPawn {
-			overall -= 15
+			overall -= 1500
 		}
 	}
 
@@ -39,9 +39,9 @@ func EvalPawnStarThem(pos *Position) int16 {
 		}
 
 		if pos.SideToMove == White && curr == BlackPawn {
-			overall -= 5
+			overall -= 500
 		} else if pos.SideToMove == Black && curr == WhitePawn {
-			overall += 5
+			overall += 500
 		}
 	}
 
