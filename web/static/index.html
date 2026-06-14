@@ -31,30 +31,38 @@
     <!-- ===================== LEFT: setup & debug ===================== -->
     <aside class="col col-left">
       <section class="panel">
-        <h2 class="panel-title">Game setup</h2>
+        <h2 class="panel-title">Match</h2>
+
+        <div class="player-pick">
+          <label for="sel-white"><span class="side-dot white"></span> White</label>
+          <select id="sel-white"></select>
+          <p class="engine-desc" id="desc-white"></p>
+        </div>
+
+        <div class="swap-row">
+          <button id="btn-swap" class="btn btn-tiny" title="Swap White and Black">⇅ Swap sides</button>
+        </div>
+
+        <div class="player-pick">
+          <label for="sel-black"><span class="side-dot black"></span> Black</label>
+          <select id="sel-black"></select>
+          <p class="engine-desc" id="desc-black"></p>
+        </div>
 
         <div class="field">
-          <label for="sel-white">White</label>
-          <select id="sel-white"></select>
-        </div>
-        <div class="field">
-          <label for="sel-black">Black</label>
-          <select id="sel-black"></select>
-        </div>
-        <div class="field">
-          <label for="new-fen">Start FEN <span class="muted">(optional)</span></label>
-          <input id="new-fen" type="text" placeholder="leave blank for standard start" spellcheck="false" autocomplete="off">
+          <label for="new-fen">Start position <span class="muted">(FEN, optional)</span></label>
+          <input id="new-fen" type="text" placeholder="standard start" spellcheck="false" autocomplete="off">
         </div>
         <button id="btn-new-game" class="btn btn-primary">New game</button>
       </section>
 
       <section class="panel">
-        <h2 class="panel-title">Engine control</h2>
+        <h2 class="panel-title">Engine play</h2>
         <div class="field">
-          <label>Engine-vs-engine mode</label>
+          <label>When both sides are engines</label>
           <div class="seg" id="seg-mode" role="group" aria-label="autoplay mode">
-            <button class="seg-btn" data-mode="auto">Auto</button>
-            <button class="seg-btn" data-mode="manual">Manual</button>
+            <button class="seg-btn" data-mode="auto">Auto-play</button>
+            <button class="seg-btn" data-mode="manual">Step through</button>
           </div>
         </div>
         <div class="btn-row">

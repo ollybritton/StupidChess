@@ -20,13 +20,24 @@ var externalUCIEngines = []string{"stockfish", "lc0"}
 func buildEngineSpecs(exe string, custom []string) []web.EngineSpec {
 	specs := make([]web.EngineSpec, 0)
 
-	for name := range engines.EngineInfo {
-		specs = append(specs, web.EngineSpec{Name: name, Path: exe, Args: []string{"uci", "-e", name}})
+	for name, eng := range engines.EngineInfo {
+		specs = append(specs, web.EngineSpec{
+			Name:        name,
+			DisplayName: displayName(eng.Name()),
+			Description: eng.Description(),
+			Path:        exe,
+			Args:        []string{"uci", "-e", name},
+		})
 	}
 
 	for _, name := range externalUCIEngines {
 		if path, err := exec.LookPath(name); err == nil {
-			specs = append(specs, web.EngineSpec{Name: name, Path: path})
+			specs = append(specs, web.EngineSpec{
+				Name:        name,
+				DisplayName: displayName(name),
+				Description: "Full-strength external engine.",
+				Path:        path,
+			})
 		}
 	}
 
@@ -41,10 +52,26 @@ func buildEngineSpecs(exe string, custom []string) []web.EngineSpec {
 		if err != nil {
 			resolved = path // let it fail at launch with a clearer message
 		}
-		specs = append(specs, web.EngineSpec{Name: name, Path: resolved})
+		specs = append(specs, web.EngineSpec{
+			Name:        name,
+			DisplayName: displayName(name),
+			Description: "External UCI engine.",
+			Path:        resolved,
+		})
 	}
 
 	return specs
+}
+
+// displayName turns an engine id like "try-hard" or "worstfish" into a label like "Try Hard".
+func displayName(name string) string {
+	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == ' ' })
+	for i, p := range parts {
+		if p != "" {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // serveCmd starts the web UI for playing against and debugging the engines.

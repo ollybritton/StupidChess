@@ -13,19 +13,22 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-// EngineSpec describes how to launch one selectable engine. Built-in engines run this same binary
-// (`stupidchess uci -e <name>`); external UCI engines like Stockfish point at their own binary.
+// EngineSpec describes how to launch one selectable engine, plus how to present it. Name is the stable
+// id used in the protocol; DisplayName and Description are for the UI. Built-in engines run this same
+// binary (`stupidchess uci -e <name>`); external UCI engines like Stockfish point at their own binary.
 type EngineSpec struct {
-	Name string
-	Path string
-	Args []string
+	Name        string
+	DisplayName string
+	Description string
+	Path        string
+	Args        []string
 }
 
 // Server bridges the browser to a single shared Game. Browsers receive events over a Server-Sent
 // Events stream and send actions as JSON POSTs; there is no websocket dependency.
 type Server struct {
-	game        *Game
-	engineNames []string
+	game       *Game
+	engineList []engineDescriptor
 
 	mu      sync.Mutex
 	clients map[chan []byte]struct{}
@@ -33,17 +36,21 @@ type Server struct {
 
 // NewServer builds the server from the set of selectable engines.
 func NewServer(specs []EngineSpec) *Server {
-	names := make([]string, 0, len(specs))
 	specMap := make(map[string]EngineSpec, len(specs))
+	descriptors := make([]engineDescriptor, 0, len(specs))
 	for _, sp := range specs {
-		names = append(names, sp.Name)
 		specMap[sp.Name] = sp
+		name := sp.DisplayName
+		if name == "" {
+			name = sp.Name
+		}
+		descriptors = append(descriptors, engineDescriptor{ID: sp.Name, Name: name, Description: sp.Description})
 	}
-	sort.Strings(names)
+	sort.Slice(descriptors, func(i, j int) bool { return descriptors[i].Name < descriptors[j].Name })
 
 	s := &Server{
-		engineNames: names,
-		clients:     map[chan []byte]struct{}{},
+		engineList: descriptors,
+		clients:    map[chan []byte]struct{}{},
 	}
 	s.game = NewGame(specMap, s.broadcast)
 	return s
@@ -122,7 +129,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer s.unsubscribe(ch)
 
 	// Prime this client with the engine list and the current state.
-	s.sendTo(w, flusher, enginesEvent{Type: "engines", List: s.engineNames})
+	s.sendTo(w, flusher, enginesEvent{Type: "engines", List: s.engineList})
 	s.sendTo(w, flusher, s.game.Snapshot())
 
 	for {

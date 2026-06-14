@@ -8,6 +8,7 @@ import (
 type Engine interface {
 	Name() string
 	Author() string
+	Description() string
 
 	NewGame() error
 	Prepare() error

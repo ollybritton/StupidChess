@@ -34,6 +34,10 @@ func (e *EnginePawnStar) Author() string {
 	return "Olly Britton"
 }
 
+func (e *EnginePawnStar) Description() string {
+	return "Values its own pawns enormously, treating each as worth far more than normal."
+}
+
 func (e *EnginePawnStar) Prepare() error {
 	// Idempotent; see EngineTryHard.Prepare for why.
 	if e.prepared {

@@ -56,9 +56,16 @@ type uciEvent struct {
 	Line   string `json:"line"`
 }
 
+// engineDescriptor presents one selectable engine: a stable id, a human-friendly name, and a blurb.
+type engineDescriptor struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type enginesEvent struct {
-	Type string   `json:"type"`
-	List []string `json:"list"`
+	Type string             `json:"type"`
+	List []engineDescriptor `json:"list"`
 }
 
 type errorEvent struct {

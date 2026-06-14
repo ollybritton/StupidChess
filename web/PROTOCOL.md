@@ -18,9 +18,13 @@ Each SSE message is a single line `data: <json>\n\n`. Every JSON object has a `t
 On a new connection the server immediately sends one `engines` event and one `state` event.
 
 ### `engines`
-The list of available engine names, for populating the player dropdowns.
+The available engines, for populating the player dropdowns. Each has a stable `id` (used in
+`new_game`), a human-friendly `name`, and a `description`. The frontend adds its own "Human" option.
 ```json
-{ "type": "engines", "list": ["tryhard", "pawnstar", "random", "sprinter", "suicideking"] }
+{ "type": "engines", "list": [
+  { "id": "tryhard", "name": "Try Hard", "description": "A genuine engine: alpha-beta search ..." },
+  { "id": "worstfish", "name": "Worstfish", "description": "Asks Stockfish to rank every move ..." }
+] }
 ```
 
 ### `state`

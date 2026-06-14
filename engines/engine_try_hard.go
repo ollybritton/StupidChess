@@ -34,6 +34,10 @@ func (e *EngineTryHard) Author() string {
 	return "Olly Britton"
 }
 
+func (e *EngineTryHard) Description() string {
+	return "A genuine engine: alpha-beta search with quiescence, piece-square evaluation and a transposition table."
+}
+
 func (e *EngineTryHard) Prepare() error {
 	// Prepare is idempotent: it starts the response pump and search goroutine exactly once. It used to
 	// be invoked on every UCI command, which spawned a fresh pair of goroutines each time and left

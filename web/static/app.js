@@ -38,7 +38,8 @@ const game = {
 
 // Frontend-only / derived UI state.
 const ui = {
-  engines: [],          // list of engine names from `engines` event
+  engines: [],          // engine descriptors {id, name, description} from the `engines` event
+  engineById: {},       // id -> descriptor, for quick lookup
   flipped: false,       // board orientation, owned entirely by the frontend
   selected: null,       // currently selected from-square (e.g. "e2") or null
   drag: null,           // active drag descriptor or null
@@ -470,6 +471,7 @@ function renderControls() {
   // player dropdowns (only overwrite if value still valid / differs)
   syncSelect($("#sel-white"), game.players.white);
   syncSelect($("#sel-black"), game.players.black);
+  renderEngineDescs();
 
   // FEN box (don't clobber while user is editing it)
   const fenBox = $("#fen-box");
@@ -904,6 +906,10 @@ function pushLogLine(node) {
    =========================================================================== */
 
 function populatePlayerSelects() {
+  // Index the engine descriptors by id for quick name/description lookup.
+  ui.engineById = {};
+  for (const e of ui.engines) ui.engineById[e.id] = e;
+
   const mk = (sel, def) => {
     const prev = sel.value;
     sel.innerHTML = "";
@@ -911,21 +917,37 @@ function populatePlayerSelects() {
     optHuman.value = "human";
     optHuman.textContent = "Human";
     sel.appendChild(optHuman);
-    for (const name of ui.engines) {
+    for (const e of ui.engines) {
       const o = el("option");
-      o.value = name;
-      o.textContent = name;
+      o.value = e.id;
+      o.textContent = e.name;
       sel.appendChild(o);
     }
     // restore previous choice if still valid, else apply default
     if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
     else sel.value = def;
   };
-  // Defaults: White = Human, Black = first engine (if any).
+
+  // Defaults: White = Human, Black = the real engine if it's available, else the first one.
+  const defaultBlack = (ui.engines.find((e) => e.id === "tryhard") || ui.engines[0] || { id: "human" }).id;
   mk($("#sel-white"), "human");
-  mk($("#sel-black"), ui.engines.length ? ui.engines[0] : "human");
+  mk($("#sel-black"), defaultBlack);
+
+  renderEngineDescs();
   // reflect current server players if a game already exists
   renderControls();
+}
+
+// Presentation info for a player id ("human" or an engine id).
+function engineInfo(id) {
+  if (id === "human") return { name: "Human", description: "You play this side." };
+  return ui.engineById[id] || { name: id, description: "" };
+}
+
+// Show the selected engine's description under each player selector.
+function renderEngineDescs() {
+  $("#desc-white").textContent = engineInfo($("#sel-white").value).description;
+  $("#desc-black").textContent = engineInfo($("#sel-black").value).description;
 }
 
 function wire() {
@@ -937,6 +959,18 @@ function wire() {
       black: $("#sel-black").value,
       fen: fenRaw ? fenRaw : null,
     });
+  });
+
+  // Update the descriptions when a player is changed.
+  $("#sel-white").addEventListener("change", renderEngineDescs);
+  $("#sel-black").addEventListener("change", renderEngineDescs);
+
+  // Swap which engine plays which colour (applied on the next New game).
+  $("#btn-swap").addEventListener("click", () => {
+    const w = $("#sel-white").value;
+    $("#sel-white").value = $("#sel-black").value;
+    $("#sel-black").value = w;
+    renderEngineDescs();
   });
 
   // Mode toggle (auto / manual)

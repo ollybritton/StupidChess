@@ -173,6 +173,22 @@ a { color: var(--accent); }
 .field-inline { display: flex; gap: 12px; }
 .field-inline .field { flex: 1; }
 
+/* match setup */
+.player-pick { margin-bottom: 10px; }
+.player-pick > label { display: flex; align-items: center; gap: 7px; font-size: 0.8rem; color: var(--text-light); margin-bottom: 5px; }
+.player-pick select { width: 100%; }
+.side-dot { width: 11px; height: 11px; border-radius: 50%; border: 1px solid var(--divider); display: inline-block; }
+.side-dot.white { background: #f4f1ea; }
+.side-dot.black { background: #2b2b2b; }
+.engine-desc {
+  margin: 6px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-light);
+  min-height: 1.1em;
+}
+.swap-row { display: flex; justify-content: center; margin: 2px 0 12px; }
+
 .muted { color: var(--text-light); }
 .small { font-size: 0.78rem; }
 .hidden { display: none !important; }

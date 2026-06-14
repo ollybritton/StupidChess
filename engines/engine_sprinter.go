@@ -24,6 +24,10 @@ func (e *EngineSprinter) Author() string {
 	return "Olly Britton"
 }
 
+func (e *EngineSprinter) Description() string {
+	return "Plays the move that travels furthest across the board, and never moves the same piece twice in a row."
+}
+
 func (e *EngineSprinter) NewGame() error {
 	e.prevPiece = position.None
 	return nil

@@ -12,6 +12,7 @@ func NewEngineSuicideKing() *SimpleEngine {
 	return NewSimpleEngine(
 		"suicide-king",
 		"Olly Britton",
+		"Marches its own king toward the enemy king, minimising the distance between them.",
 		func(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
 			return moveMinimiseKingDistance(pos)
 		},

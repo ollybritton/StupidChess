@@ -11,6 +11,7 @@ func NewEngineRandom() *SimpleEngine {
 	return NewSimpleEngine(
 		"random",
 		"Olly Britton",
+		"Plays a uniformly random legal move.",
 		func(pos *position.Position, searchOptions search.SearchOptions) (position.Move, error) {
 			return moveRandom(pos)
 		},

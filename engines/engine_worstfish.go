@@ -27,6 +27,9 @@ func NewEngineWorstfish() *EngineWorstfish {
 
 func (e *EngineWorstfish) Name() string   { return "worstfish" }
 func (e *EngineWorstfish) Author() string { return "Olly Britton" }
+func (e *EngineWorstfish) Description() string {
+	return "Asks Stockfish to rank every move, then plays the one it rates worst."
+}
 
 // Prepare launches the Stockfish oracle once. If Stockfish isn't on PATH, the oracle stays nil and
 // the engine falls back to random moves (rather than failing).
