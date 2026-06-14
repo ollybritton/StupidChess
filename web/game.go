@@ -9,7 +9,7 @@ import (
 
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
-	"github.com/ollybritton/StupidChess/uci"
+	"github.com/ollybritton/StupidChess/uciclient"
 )
 
 // defaultMoveTime bounds how long an engine thinks per move in the UI. Without it the engines fall
@@ -26,7 +26,7 @@ type histMove struct {
 // playerSlot is one side's player: either a human or a running engine subprocess.
 type playerSlot struct {
 	name string // "human" or an engine name
-	sess *uci.GUISession
+	sess *uciclient.GUISession
 }
 
 func (p playerSlot) isEngine() bool { return p.name != "" && p.name != "human" }
@@ -287,7 +287,7 @@ func (g *Game) makeSlot(name string, color position.Color) (playerSlot, error) {
 		return playerSlot{}, fmt.Errorf("unknown engine %q", name)
 	}
 
-	sess, err := uci.NewGUISessionFromBinary(spec.Path, spec.Args...)
+	sess, err := uciclient.NewGUISessionFromBinary(spec.Path, spec.Args...)
 	if err != nil {
 		return playerSlot{}, fmt.Errorf("couldn't start engine %q: %w", name, err)
 	}

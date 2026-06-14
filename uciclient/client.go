@@ -1,4 +1,8 @@
-package uci
+// Package uciclient drives an external UCI engine from the perspective of the controller (what the
+// UCI documentation calls the "GUI"). It lives in its own package — depending only on position and
+// search, not engines — so that it can be used both by the web server and by engines that consult an
+// oracle (e.g. worstfish driving Stockfish) without an import cycle.
+package uciclient
 
 import (
 	"bufio"
@@ -14,10 +18,9 @@ import (
 	"github.com/ollybritton/StupidChess/search"
 )
 
-// GUISession drives a UCI engine from the perspective of the controller (what the UCI documentation
-// calls the "GUI"). It is used to automate games between engines and to relay an engine to the web UI.
+// GUISession drives a UCI engine.
 //
-//	sess, _ := NewGUISessionFromBinary("stupidchess", "uci", "-e", "tryhard")
+//	sess, _ := NewGUISessionFromBinary("stockfish")
 //	sess.Open()                       // handshake: uci -> uciok
 //	sess.SetPosition(fen, moves)      // position fen ... moves ...
 //	move, _ := sess.Search(opts, onInfo)
@@ -208,6 +211,11 @@ func (s *GUISession) NewGame() error {
 		return err
 	}
 	return s.IsReady()
+}
+
+// SetOption sets a UCI option, e.g. SetOption("MultiPV", "20").
+func (s *GUISession) SetOption(name, value string) error {
+	return s.sendCommand("setoption name %s value %s", name, value)
 }
 
 // SetPosition sends the position as a FEN plus a list of UCI moves played from it.

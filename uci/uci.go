@@ -9,8 +9,8 @@ import (
 	"github.com/ollybritton/StupidChess/engines"
 )
 
-// uci implements the universal chess interface (UCI) both from the perspective of the engine (in `as_engine.go`) and
-// from the persepctive of the GUI (in `as_gui.go`).
+// uci implements the universal chess interface (UCI) from the perspective of the engine (in
+// `as_engine.go`). The controller/GUI side lives in the separate `uciclient` package.
 
 func log(msg string) {
 	logfile := `/tmp/stupidchess-debug-in`
