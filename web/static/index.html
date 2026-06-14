@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StupidChess</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Apply the saved/system theme before first paint to avoid a flash.
+    (function () {
+      var t = localStorage.getItem("sc-theme");
+      if (!t) t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+</head>
+<body>
+  <!-- Connection indicator (hidden unless disconnected) -->
+  <div id="conn-banner" class="conn-banner hidden">disconnected — reconnecting…</div>
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">♞</span> StupidChess <span class="brand-sub">engine lab</span></div>
+    <div class="topbar-actions">
+      <button id="btn-flip" class="icon-btn" title="Flip board">⟲ Flip</button>
+      <button id="btn-sound" class="icon-btn" title="Toggle sounds">♪ Sound</button>
+      <button id="btn-theme" class="icon-btn" title="Toggle light / dark">☾ Dark</button>
+    </div>
+  </header>
+
+  <div class="app">
+    <!-- ===================== LEFT: setup & debug ===================== -->
+    <aside class="col col-left">
+      <section class="panel">
+        <h2 class="panel-title">Game setup</h2>
+
+        <div class="field">
+          <label for="sel-white">White</label>
+          <select id="sel-white"></select>
+        </div>
+        <div class="field">
+          <label for="sel-black">Black</label>
+          <select id="sel-black"></select>
+        </div>
+        <div class="field">
+          <label for="new-fen">Start FEN <span class="muted">(optional)</span></label>
+          <input id="new-fen" type="text" placeholder="leave blank for standard start" spellcheck="false" autocomplete="off">
+        </div>
+        <button id="btn-new-game" class="btn btn-primary">New game</button>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Engine control</h2>
+        <div class="field">
+          <label>Engine-vs-engine mode</label>
+          <div class="seg" id="seg-mode" role="group" aria-label="autoplay mode">
+            <button class="seg-btn" data-mode="auto">Auto</button>
+            <button class="seg-btn" data-mode="manual">Manual</button>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button id="btn-step" class="btn">Step</button>
+          <button id="btn-go" class="btn">Move now</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Search limits</h2>
+        <div class="field-inline">
+          <div class="field">
+            <label for="opt-movetime">Move time (ms)</label>
+            <input id="opt-movetime" type="number" min="0" step="50" placeholder="auto">
+          </div>
+          <div class="field">
+            <label for="opt-depth">Depth</label>
+            <input id="opt-depth" type="number" min="0" step="1" placeholder="auto">
+          </div>
+        </div>
+        <p class="muted small">Blank / 0 lets the engine manage its own time.</p>
+      </section>
+
+      <section class="panel panel-console">
+        <div class="console-head">
+          <button id="console-toggle" class="console-toggle" aria-expanded="true">
+            <span class="caret">▾</span> UCI console
+          </button>
+          <button id="console-clear" class="btn btn-tiny">clear</button>
+        </div>
+        <div id="uci-log" class="uci-log" aria-live="off"></div>
+      </section>
+    </aside>
+
+    <!-- ===================== CENTER: board ===================== -->
+    <main class="col col-center">
+      <div id="board-wrap" class="board-wrap">
+        <div id="board" class="board"></div>
+        <!-- promotion picker is injected here when needed -->
+      </div>
+    </main>
+
+    <!-- ===================== RIGHT: analysis & history ===================== -->
+    <aside class="col col-right">
+      <div class="analysis">
+        <div class="evalbar" id="evalbar" title="Evaluation">
+          <div class="evalbar-fill" id="evalbar-fill"></div>
+          <span class="evalbar-label" id="evalbar-label">0.00</span>
+        </div>
+
+        <div class="analysis-main">
+          <section class="panel info-panel">
+            <h2 class="panel-title">Engine info</h2>
+            <div class="info-grid">
+              <div><span class="info-k">depth</span><span class="info-v" id="i-depth">—</span></div>
+              <div><span class="info-k">score</span><span class="info-v" id="i-score">—</span></div>
+              <div><span class="info-k">nodes</span><span class="info-v" id="i-nodes">—</span></div>
+              <div><span class="info-k">nps</span><span class="info-v" id="i-nps">—</span></div>
+              <div><span class="info-k">time</span><span class="info-v" id="i-time">—</span></div>
+            </div>
+            <div class="info-pv">
+              <span class="info-k">pv</span>
+              <code class="info-pv-moves" id="i-pv">—</code>
+            </div>
+          </section>
+
+          <div class="status-line" id="status-line">No game.</div>
+        </div>
+      </div>
+
+      <section class="panel panel-moves">
+        <h2 class="panel-title">Moves</h2>
+        <div class="movelist" id="movelist"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">FEN</h2>
+        <input id="fen-box" class="fen-box" type="text" spellcheck="false" autocomplete="off">
+        <div class="btn-row">
+          <button id="btn-set-fen" class="btn">Set</button>
+          <button id="btn-copy-fen" class="btn">Copy</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
