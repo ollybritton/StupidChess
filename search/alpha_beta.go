@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ollybritton/StupidChess/nnue"
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/syzygy"
 )
@@ -52,6 +53,11 @@ type AlphaBetaSearch struct {
 	us       position.Color
 	evalUs   position.Evaluator
 	evalThem position.Evaluator
+
+	// inc, when non-nil, is an incremental NNUE evaluator used in place of evalUs/evalThem. It carries an
+	// accumulator stack updated as the search makes and unmakes moves, so it is per-worker: Root clones it
+	// for each Lazy-SMP thread. nil means the hand-crafted evaluators above are used instead.
+	inc *nnueEvaluator
 
 	startTime time.Time
 	nodeCount int // this worker's local node count (flushed in batches into sh.nodes)
@@ -130,6 +136,37 @@ func (s *AlphaBetaSearch) SetEvaluator(evalUs, evalThem position.Evaluator) {
 // endgames with perfect knowledge.
 func (s *AlphaBetaSearch) SetTablebases(tb *syzygy.Tablebases) {
 	s.tb = tb
+}
+
+// SetNNUE switches the evaluation to an incremental NNUE network (nil reverts to the hand-crafted
+// evaluators set with SetEvaluator). Call it between searches; Root clones the evaluator per worker.
+func (s *AlphaBetaSearch) SetNNUE(net *nnue.Network) {
+	if net == nil {
+		s.inc = nil
+		return
+	}
+	s.inc = newNNUEEvaluator(net)
+}
+
+// makeMove applies a move to pos and, if NNUE is active, updates the incremental accumulator. It returns
+// false (updating nothing) when the move is illegal, exactly like Position.MakeMove. Every successful
+// makeMove must be paired with an undoMove so the accumulator stack stays in step with the board.
+func (s *AlphaBetaSearch) makeMove(pos *position.Position, m position.Move) bool {
+	if !pos.MakeMove(m) {
+		return false
+	}
+	if s.inc != nil {
+		s.inc.makeMove(pos, m)
+	}
+	return true
+}
+
+// undoMove reverts the move made by makeMove, popping the incremental accumulator if NNUE is active.
+func (s *AlphaBetaSearch) undoMove(pos *position.Position, m position.Move) {
+	pos.UndoMove(m)
+	if s.inc != nil {
+		s.inc.undoMove()
+	}
 }
 
 // tbWinScore is the value of a tablebase win. It sits above any ordinary evaluation (evalLimit, 20000)
@@ -262,7 +299,15 @@ func (s *AlphaBetaSearch) Root() error {
 				w.history = [2][64][64]int32{}
 				w.nodeCount = 0
 
-				best, ponder := w.iterativeDeepen(pos.Clone(), id == 0)
+				board := pos.Clone()
+				// Each worker needs its own incremental accumulator (the stack is mutated during search),
+				// rebuilt from the root position it is about to search.
+				if s.inc != nil {
+					w.inc = newNNUEEvaluator(s.inc.net)
+					w.inc.reset(board)
+				}
+
+				best, ponder := w.iterativeDeepen(board, id == 0)
 				if id == 0 {
 					mainBest, mainPonder = best, ponder
 				}
@@ -313,9 +358,11 @@ func (s *AlphaBetaSearch) iterativeDeepen(pos *position.Position, isMain bool) (
 			}
 
 			childPV.clear()
-			pos.MakeMove(move)
+			if !s.makeMove(pos, move) {
+				continue
+			}
 			score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
-			pos.UndoMove(move)
+			s.undoMove(pos, move)
 
 			if s.stopped() {
 				interrupted = true
@@ -643,7 +690,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		scores[i], scores[bestIdx] = scores[bestIdx], scores[i]
 		move := moves[i]
 
-		if !pos.MakeMove(move) {
+		if !s.makeMove(pos, move) {
 			continue // illegal: this move left our king in check
 		}
 		legalCount++
@@ -664,11 +711,11 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		//     quiet move is very unlikely to, so skip it.
 		if !isPV && !inCheck && extension == 0 && legalCount > 1 && isQuiet(move) && !givesCheck {
 			if depth <= lmpMaxDepth && legalCount > 3+int(depth*depth) {
-				pos.UndoMove(move)
+				s.undoMove(pos, move)
 				continue
 			}
 			if depth <= futilityMaxDepth && int(staticEval)+futilityMargin*int(depth) <= int(alpha) {
-				pos.UndoMove(move)
+				s.undoMove(pos, move)
 				continue
 			}
 		}
@@ -699,7 +746,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 				score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos) // a real new PV: full window
 			}
 		}
-		pos.UndoMove(move)
+		s.undoMove(pos, move)
 
 		if score > bestScore {
 			bestScore = score
@@ -807,13 +854,13 @@ func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Posi
 			}
 		}
 
-		if !pos.MakeMove(move) {
+		if !s.makeMove(pos, move) {
 			continue
 		}
 		legalCount++
 
 		score := -s.quiesce(-beta, -alpha, ply+1, pos)
-		pos.UndoMove(move)
+		s.undoMove(pos, move)
 
 		if score > bestScore {
 			bestScore = score
@@ -834,9 +881,14 @@ func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Posi
 	return bestScore
 }
 
-// leafEval returns the static evaluation of a leaf from the side-to-move's perspective, using the
-// "us"/"them" evaluator depending on whose turn it is (identical for symmetric engines like tryhard).
+// leafEval returns the static evaluation of a leaf from the side-to-move's perspective. With NNUE active
+// it reads the incrementally maintained accumulator; otherwise it uses the "us"/"them" hand-crafted
+// evaluator depending on whose turn it is (identical for symmetric engines like tryhard). Both paths
+// return a White-positive score that ScoreFromPerspective flips to the side to move.
 func (s *AlphaBetaSearch) leafEval(pos *position.Position) int16 {
+	if s.inc != nil {
+		return position.ScoreFromPerspective(s.inc.eval(pos), pos.SideToMove)
+	}
 	if pos.SideToMove == s.us {
 		return position.ScoreFromPerspective(s.evalUs(pos), pos.SideToMove)
 	}

@@ -99,10 +99,11 @@ func (e *searchEngine) setSyzygy(path string) {
 }
 
 // setEvalFile switches the evaluation to an NNUE network (or, for an empty path, back to the engine's
-// own hand-crafted evaluation). The network is side-to-move relative, so it is wrapped to the
-// White-positive convention the search expects.
+// own hand-crafted evaluation). The network is evaluated incrementally by the search, so it is handed to
+// the searcher whole rather than wrapped as a stateless function.
 func (e *searchEngine) setEvalFile(path string) {
 	if path == "" {
+		e.searcher.SetNNUE(nil)
 		e.searcher.SetEvaluator(e.defaultEvalUs, e.defaultEvalThem)
 		return
 	}
@@ -111,14 +112,7 @@ func (e *searchEngine) setEvalFile(path string) {
 		fmt.Printf("info string could not load nnue from %q: %v\n", path, err)
 		return
 	}
-	eval := func(pos *position.Position) int16 {
-		v := net.Eval(pos)
-		if pos.SideToMove == position.Black {
-			return -v
-		}
-		return v
-	}
-	e.searcher.SetEvaluator(eval, eval)
+	e.searcher.SetNNUE(net)
 	fmt.Printf("info string nnue loaded from %s (hash ok: %v)\n", path, net.HashOK)
 }
 

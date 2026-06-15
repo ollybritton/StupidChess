@@ -351,7 +351,95 @@ func TestRealNetIncrementalMatchesRefresh(t *testing.T) {
 	}
 }
 
+// --- Incremental Update vs Refresh over random games --------------------------
+
+// TestUpdateMatchesRefreshRandomGames is the core correctness check for the
+// incremental accumulator. It plays many random legal games and, after every
+// move, asserts that an accumulator carried forward with Update is bit-identical
+// to one rebuilt from scratch with Refresh. The network has every feature column
+// populated with distinct random values, so any error in the feature indices
+// Update touches (a mishandled en passant, castling rook, promotion or king-move
+// refresh) shows up immediately as an accumulation mismatch rather than hiding
+// behind a zero weight column.
+func TestUpdateMatchesRefreshRandomGames(t *testing.T) {
+	n := denseTestNetwork(1)
+	for seed := int64(0); seed < 40; seed++ {
+		playRandomGameChecking(t, n, seed, 120)
+	}
+}
+
+// TestRealNetUpdateMatchesRefreshRandomGames runs the same random-game check
+// against the genuine net, so the incremental path is validated on the exact
+// weights the engine plays with (skipped if the net is absent).
+func TestRealNetUpdateMatchesRefreshRandomGames(t *testing.T) {
+	if !haveRealNet() {
+		t.Skip("no real net at " + realNetPath)
+	}
+	n, err := Load(realNetPath)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for seed := int64(0); seed < 8; seed++ {
+		playRandomGameChecking(t, n, seed, 120)
+	}
+}
+
+// playRandomGameChecking plays up to maxMoves random legal moves from the start
+// position, maintaining an accumulator incrementally with Update and comparing it
+// to a from-scratch Refresh (and the resulting evals) after each move.
+func playRandomGameChecking(t *testing.T, n *Network, seed int64, maxMoves int) {
+	t.Helper()
+	rng := rand.New(rand.NewSource(seed + 1))
+	pos := mustFEN(t, position.StartingPosition)
+
+	var inc Accumulator
+	inc.Refresh(n, pos)
+
+	for ply := 0; ply < maxMoves; ply++ {
+		moves := pos.MovesPseudolegal().AsSlice()
+		rng.Shuffle(len(moves), func(i, j int) { moves[i], moves[j] = moves[j], moves[i] })
+
+		var move position.Move
+		made := false
+		for _, mv := range moves {
+			if pos.MakeMove(mv) {
+				move, made = mv, true
+				break
+			}
+		}
+		if !made {
+			return // checkmate or stalemate: game over
+		}
+
+		var child, fresh Accumulator
+		child.Update(n, &inc, pos, move)
+		fresh.Refresh(n, pos)
+		if child.accumulation != fresh.accumulation {
+			t.Fatalf("seed %d ply %d: Update disagrees with Refresh after %s (fen %s)",
+				seed, ply, move.String(), pos.StringFEN())
+		}
+		if a, b := n.EvalWith(&child, pos.SideToMove), n.Eval(pos); a != b {
+			t.Fatalf("seed %d ply %d: incremental eval %d != refresh eval %d after %s",
+				seed, ply, a, b, move.String())
+		}
+		inc = child
+	}
+}
+
 // --- helpers ------------------------------------------------------------------
+
+// denseTestNetwork returns a network whose entire feature-transformer weight
+// matrix is filled with distinct small random values (unlike randomTinyNetwork,
+// which leaves most columns zero). This makes the incremental-vs-refresh test
+// sensitive to any wrong feature index, since distinct columns can't cancel.
+func denseTestNetwork(seed int64) *Network {
+	n := randomTinyNetwork(seed)
+	rng := rand.New(rand.NewSource(seed*2654435761 + 1))
+	for i := range n.ftWeights {
+		n.ftWeights[i] = int16(rng.Intn(64) - 32)
+	}
+	return n
+}
 
 func mustFEN(t *testing.T, fen string) *position.Position {
 	t.Helper()

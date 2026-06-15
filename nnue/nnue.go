@@ -235,24 +235,33 @@ type Accumulator struct {
 // FeatureTransformer::RefreshAccumulator: start from the biases, then add the
 // weight column for every active feature.
 func (a *Accumulator) Refresh(n *Network, pos *position.Position) {
-	for p := 0; p < 2; p++ {
-		copy(a.accumulation[p][:], n.ftBiases[:])
-	}
+	a.refreshPerspective(n, pos, position.White)
+	a.refreshPerspective(n, pos, position.Black)
+	a.computed = true
+}
 
-	var indices [2][]uint32
-	appendActiveIndices(pos, position.White, &indices[0])
-	appendActiveIndices(pos, position.Black, &indices[1])
+// refreshPerspective recomputes a single perspective's accumulation from scratch
+// (biases plus the weight column of every active feature for that perspective).
+// A full Refresh is just this done for both perspectives. It is also the path
+// taken incrementally when the side's own king moves: under HalfKP every feature
+// of a perspective is keyed by that perspective's king square, so a king move
+// invalidates the whole perspective and there is nothing to update incrementally.
+func (a *Accumulator) refreshPerspective(n *Network, pos *position.Position, perspective position.Color) {
+	p := perspectiveIndex(perspective)
+	acc := &a.accumulation[p]
+	copy(acc[:], n.ftBiases[:])
 
-	for p := 0; p < 2; p++ {
-		acc := &a.accumulation[p]
-		for _, idx := range indices[p] {
-			col := n.ftWeightColumn(idx)
-			for j := 0; j < TransformedFeatureDimensions; j++ {
-				acc[j] += col[j]
-			}
+	orientedKing := orient(perspective, pos.KingLocation[p])
+	for sq := uint8(0); sq < 64; sq++ {
+		pc := pos.Squares[sq]
+		if pc == position.Empty || pc == position.WhiteKing || pc == position.BlackKing {
+			continue
+		}
+		col := n.ftWeightColumn(MakeIndex(perspective, sq, pc, orientedKing))
+		for j := 0; j < TransformedFeatureDimensions; j++ {
+			acc[j] += col[j]
 		}
 	}
-	a.computed = true
 }
 
 // Add activates a single feature in the given perspective's accumulation by
@@ -275,6 +284,127 @@ func (a *Accumulator) Remove(n *Network, perspective position.Color, index uint3
 	for j := 0; j < TransformedFeatureDimensions; j++ {
 		acc[j] -= col[j]
 	}
+}
+
+// featureChange is a single non-king piece placement (a piece appearing on, or
+// leaving, a square) caused by a move. Kings are never recorded because HalfKP
+// does not encode them as features.
+type featureChange struct {
+	piece position.ColoredPiece
+	sq    uint8
+}
+
+// Update computes this accumulator as the result of applying move m to the
+// position that prev describes, leaving pos as the board AFTER the move. It is
+// the incremental counterpart of Refresh: instead of rebuilding from scratch it
+// copies prev and adds/removes only the handful of feature columns the move
+// touched.
+//
+// Under HalfKP each perspective's features are keyed by that perspective's own
+// king square, so when the side to move moves its king (including castling) that
+// whole perspective is rebuilt with refreshPerspective; the opponent's
+// perspective is still updated incrementally (the king is not a feature there).
+// All the other cases - captures (including en passant, whose captured pawn is
+// not on the destination square), promotions, and the castling rook - reduce to
+// a small list of removed and added (piece, square) features applied to both
+// perspectives. prev and a may not alias.
+func (a *Accumulator) Update(n *Network, prev *Accumulator, pos *position.Position, m position.Move) {
+	mover := m.Moved().Color()
+	moved := m.Moved()
+	from, to := m.From(), m.To()
+	captured := m.Captured()
+	promo := m.Promotion()
+	movedKing := moved.Colorless() == position.King
+
+	var removed, added [3]featureChange
+	nr, na := 0, 0
+	remove := func(pc position.ColoredPiece, sq uint8) {
+		if pc.Colorless() == position.King {
+			return
+		}
+		removed[nr] = featureChange{pc, sq}
+		nr++
+	}
+	add := func(pc position.ColoredPiece, sq uint8) {
+		if pc.Colorless() == position.King {
+			return
+		}
+		added[na] = featureChange{pc, sq}
+		na++
+	}
+
+	// The moving piece leaves its origin square.
+	remove(moved, from)
+
+	// The captured piece, if any. En passant captures a pawn that is not on the
+	// destination square but one rank behind it (relative to the mover).
+	enPassant := moved.Colorless() == position.Pawn &&
+		m.PriorEnPassantTarget() != position.NoEnPassant && to == m.PriorEnPassantTarget()
+	switch {
+	case enPassant:
+		capSq := to - 8
+		if mover == position.Black {
+			capSq = to + 8
+		}
+		remove(captured, capSq)
+	case captured != position.Empty:
+		remove(captured, to)
+	}
+
+	// The moving piece arrives on its destination, becoming the promoted piece if
+	// this is a promotion.
+	if promo != position.None {
+		add(promo.OfColor(mover), to)
+	} else {
+		add(moved, to)
+	}
+
+	// Castling additionally relocates the rook (the king is handled by refreshing
+	// the mover's perspective below).
+	if movedKing && (int(from)-int(to) == 2 || int(to)-int(from) == 2) {
+		rook := position.Rook.OfColor(mover)
+		var rookFrom, rookTo uint8
+		switch to {
+		case position.SquareG1:
+			rookFrom, rookTo = position.SquareH1, position.SquareF1
+		case position.SquareC1:
+			rookFrom, rookTo = position.SquareA1, position.SquareD1
+		case position.SquareG8:
+			rookFrom, rookTo = position.SquareH8, position.SquareF8
+		case position.SquareC8:
+			rookFrom, rookTo = position.SquareA8, position.SquareD8
+		}
+		remove(rook, rookFrom)
+		add(rook, rookTo)
+	}
+
+	for p := 0; p < 2; p++ {
+		perspective := position.Color(p)
+
+		// The mover's own king moved: this perspective's king bucket changed, so
+		// nothing can be carried over - rebuild it from the board.
+		if movedKing && perspective == mover {
+			a.refreshPerspective(n, pos, perspective)
+			continue
+		}
+
+		a.accumulation[p] = prev.accumulation[p]
+		orientedKing := orient(perspective, pos.KingLocation[p])
+		acc := &a.accumulation[p]
+		for i := 0; i < nr; i++ {
+			col := n.ftWeightColumn(MakeIndex(perspective, removed[i].sq, removed[i].piece, orientedKing))
+			for j := 0; j < TransformedFeatureDimensions; j++ {
+				acc[j] -= col[j]
+			}
+		}
+		for i := 0; i < na; i++ {
+			col := n.ftWeightColumn(MakeIndex(perspective, added[i].sq, added[i].piece, orientedKing))
+			for j := 0; j < TransformedFeatureDimensions; j++ {
+				acc[j] += col[j]
+			}
+		}
+	}
+	a.computed = true
 }
 
 // ---------------------------------------------------------------------------
@@ -480,7 +610,8 @@ func (n *Network) EvalWith(acc *Accumulator, sideToMove position.Color) int16 {
 // affine performs a single affine transform: out[i] = bias[i] + sum_j w[i][j] *
 // in[j], with int8 weights (row-major, stride len(in)) and uint8 inputs,
 // accumulating into int32. This is the scalar reference path from
-// AffineTransform::Propagate.
+// AffineTransform::Propagate. It is the most expensive part of an evaluation;
+// a real speedup here needs SIMD (pmaddubsw), which would have to be assembly.
 func affine(in []uint8, weights []int8, biases []int32, out []int32) {
 	inDim := len(in)
 	for i := range out {

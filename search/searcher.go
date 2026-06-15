@@ -1,6 +1,7 @@
 package search
 
 import (
+	"github.com/ollybritton/StupidChess/nnue"
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/syzygy"
 )
@@ -15,8 +16,10 @@ type Searcher interface {
 	PonderHit()
 	// SetThreads sets how many search threads to use (Lazy SMP).
 	SetThreads(n int)
-	// SetEvaluator swaps the evaluation functions (e.g. hand-crafted eval <-> NNUE).
+	// SetEvaluator swaps the hand-crafted evaluation functions (e.g. between personalities).
 	SetEvaluator(evalUs, evalThem position.Evaluator)
+	// SetNNUE switches evaluation to an incremental NNUE network (nil reverts to the hand-crafted eval).
+	SetNNUE(net *nnue.Network)
 	// SetTablebases installs (nil clears) the Syzygy endgame tablebases.
 	SetTablebases(tb *syzygy.Tablebases)
 }
