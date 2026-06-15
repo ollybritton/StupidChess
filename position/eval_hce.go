@@ -5,8 +5,56 @@ import "math/bits"
 // eval_hce.go holds the positional ("hand-crafted evaluation") terms layered on top of material and
 // the piece-square tables in eval_complex.go: mobility, pawn structure, king safety, the bishop pair,
 // rooks on open files and a tempo bonus. Every term carries a middlegame and an endgame value, blended
-// by game phase in EvalComplex. Values are hand-set to sensible, community-standard magnitudes; the
-// natural next step is to fit them with Texel tuning against labelled positions.
+// by game phase in EvalWith.
+//
+// All the weights live in EvalParams, so an engine can build its own evaluator with MakeEvaluator by
+// copying DefaultEvalParams and re-weighting terms (e.g. one that loves king safety). See
+// EvaluatorInfo / MakeEvaluator.
+
+// Pair is a (middlegame, endgame) weight, blended by game phase.
+type Pair struct{ MG, EG int }
+
+// EvalParams holds the weight of every positional evaluation term. Copy DefaultEvalParams and tweak.
+type EvalParams struct {
+	KnightMobility Pair // per square a knight can reach
+	BishopMobility Pair
+	RookMobility   Pair
+	QueenMobility  Pair
+
+	Doubled  Pair // penalty per extra pawn on a file
+	Isolated Pair // penalty per pawn with no neighbours
+	Passed   [8]Pair // bonus by rank advanced (index = rank, 0 unused)
+
+	BishopPair Pair
+	RookOpen   Pair // rook on a file with no pawns
+	RookSemi   Pair // rook on a file with no friendly pawns
+
+	KingShield   int // middlegame bonus per friendly pawn shielding the king
+	KingOpenFile int // middlegame penalty per (semi-)open file beside the king
+	Tempo        int // middlegame bonus for the side to move
+}
+
+// DefaultEvalParams are the standard weights used by EvalComplex (and tryhard / fortress).
+var DefaultEvalParams = EvalParams{
+	KnightMobility: Pair{4, 4},
+	BishopMobility: Pair{4, 4},
+	RookMobility:   Pair{2, 4},
+	QueenMobility:  Pair{1, 2},
+
+	Doubled:  Pair{10, 22},
+	Isolated: Pair{14, 8},
+	Passed: [8]Pair{
+		{0, 0}, {5, 12}, {10, 24}, {20, 48}, {35, 80}, {60, 130}, {100, 200}, {0, 0},
+	},
+
+	BishopPair: Pair{25, 45},
+	RookOpen:   Pair{22, 12},
+	RookSemi:   Pair{10, 6},
+
+	KingShield:   9,
+	KingOpenFile: 16,
+	Tempo:        14,
+}
 
 // Precomputed masks.
 var (
@@ -62,177 +110,144 @@ func init() {
 	}
 }
 
-// Positional weights, in centipawns, as (middlegame, endgame) pairs.
-const (
-	knightMobMG, knightMobEG = 4, 4
-	bishopMobMG, bishopMobEG = 4, 4
-	rookMobMG, rookMobEG     = 2, 4
-	queenMobMG, queenMobEG   = 1, 2
-
-	doubledMG, doubledEG   = 10, 22
-	isolatedMG, isolatedEG = 14, 8
-
-	bishopPairMG, bishopPairEG = 25, 45
-	rookOpenMG, rookOpenEG     = 22, 12
-	rookSemiMG, rookSemiEG     = 10, 6
-
-	shieldBonus         = 9  // middlegame bonus per friendly pawn shielding the king
-	kingOpenFilePenalty = 16 // middlegame penalty per (semi-)open file beside the king
-	tempoBonus          = 14 // middlegame bonus for the side to move
-)
-
-var (
-	passedBonusMG = [8]int{0, 5, 10, 20, 35, 60, 100, 0}
-	passedBonusEG = [8]int{0, 12, 24, 48, 80, 130, 200, 0}
-)
-
 func popcount(b Bitboard) int { return bits.OnesCount64(uint64(b)) }
 
-// evalPositional returns the white-positive middlegame and endgame positional scores.
-func evalPositional(pos *Position) (mg, eg int) {
+// evalPositional returns the white-positive middlegame and endgame positional scores under p.
+func evalPositional(pos *Position, p *EvalParams) (mg, eg int) {
 	occupied := pos.Occupied[White] | pos.Occupied[Black]
 	whitePawns := pos.Pieces[Pawn] & pos.Occupied[White]
 	blackPawns := pos.Pieces[Pawn] & pos.Occupied[Black]
 
-	wmMG, wmEG := pieceMobility(pos, White, occupied)
-	bmMG, bmEG := pieceMobility(pos, Black, occupied)
+	wmMG, wmEG := pieceMobility(pos, White, occupied, p)
+	bmMG, bmEG := pieceMobility(pos, Black, occupied, p)
 	mg += wmMG - bmMG
 	eg += wmEG - bmEG
 
-	pMG, pEG := pawnStructure(whitePawns, blackPawns)
+	pMG, pEG := pawnStructure(whitePawns, blackPawns, p)
 	mg += pMG
 	eg += pEG
 
-	// Bishop pair.
 	if popcount(pos.Pieces[Bishop]&pos.Occupied[White]) >= 2 {
-		mg += bishopPairMG
-		eg += bishopPairEG
+		mg += p.BishopPair.MG
+		eg += p.BishopPair.EG
 	}
 	if popcount(pos.Pieces[Bishop]&pos.Occupied[Black]) >= 2 {
-		mg -= bishopPairMG
-		eg -= bishopPairEG
+		mg -= p.BishopPair.MG
+		eg -= p.BishopPair.EG
 	}
 
-	// Rooks on open / semi-open files.
-	rMG, rEG := rookFiles(pos.Pieces[Rook]&pos.Occupied[White], whitePawns, blackPawns)
+	rMG, rEG := rookFiles(pos.Pieces[Rook]&pos.Occupied[White], whitePawns, blackPawns, p)
 	mg += rMG
 	eg += rEG
-	rMG, rEG = rookFiles(pos.Pieces[Rook]&pos.Occupied[Black], blackPawns, whitePawns)
+	rMG, rEG = rookFiles(pos.Pieces[Rook]&pos.Occupied[Black], blackPawns, whitePawns, p)
 	mg -= rMG
 	eg -= rEG
 
-	// King safety (a middlegame concern), as White minus Black.
-	mg += kingSafety(pos.KingLocation[White], whitePawns, White)
-	mg -= kingSafety(pos.KingLocation[Black], blackPawns, Black)
+	mg += kingSafety(pos.KingLocation[White], whitePawns, White, p)
+	mg -= kingSafety(pos.KingLocation[Black], blackPawns, Black, p)
 
-	// Tempo.
 	if pos.SideToMove == White {
-		mg += tempoBonus
+		mg += p.Tempo
 	} else {
-		mg -= tempoBonus
+		mg -= p.Tempo
 	}
 
 	return mg, eg
 }
 
-// pieceMobility scores a colour's piece mobility (the number of squares each piece can move to or
-// capture on), which rewards active, well-placed pieces.
-func pieceMobility(pos *Position, color Color, occupied Bitboard) (mg, eg int) {
+// pieceMobility scores a colour's piece mobility (squares each piece can move to or capture on).
+func pieceMobility(pos *Position, color Color, occupied Bitboard, p *EvalParams) (mg, eg int) {
 	own := pos.Occupied[color]
 
 	for bb := pos.Pieces[Knight] & own; bb != 0; bb &= bb - 1 {
 		sq := bits.TrailingZeros64(uint64(bb))
 		m := popcount(knightMoves[sq] &^ own)
-		mg += m * knightMobMG
-		eg += m * knightMobEG
+		mg += m * p.KnightMobility.MG
+		eg += m * p.KnightMobility.EG
 	}
 	for bb := pos.Pieces[Bishop] & own; bb != 0; bb &= bb - 1 {
 		sq := uint8(bits.TrailingZeros64(uint64(bb)))
 		m := popcount(bishopAttacks(sq, occupied) &^ own)
-		mg += m * bishopMobMG
-		eg += m * bishopMobEG
+		mg += m * p.BishopMobility.MG
+		eg += m * p.BishopMobility.EG
 	}
 	for bb := pos.Pieces[Rook] & own; bb != 0; bb &= bb - 1 {
 		sq := uint8(bits.TrailingZeros64(uint64(bb)))
 		m := popcount(rookAttacks(sq, occupied) &^ own)
-		mg += m * rookMobMG
-		eg += m * rookMobEG
+		mg += m * p.RookMobility.MG
+		eg += m * p.RookMobility.EG
 	}
 	for bb := pos.Pieces[Queen] & own; bb != 0; bb &= bb - 1 {
 		sq := uint8(bits.TrailingZeros64(uint64(bb)))
 		m := popcount((rookAttacks(sq, occupied)|bishopAttacks(sq, occupied)) &^ own)
-		mg += m * queenMobMG
-		eg += m * queenMobEG
+		mg += m * p.QueenMobility.MG
+		eg += m * p.QueenMobility.EG
 	}
 	return mg, eg
 }
 
 // pawnStructure scores doubled, isolated and passed pawns, white-positive.
-func pawnStructure(whitePawns, blackPawns Bitboard) (mg, eg int) {
+func pawnStructure(whitePawns, blackPawns Bitboard, p *EvalParams) (mg, eg int) {
 	for f := 0; f < 8; f++ {
 		wc := popcount(whitePawns & fileMask[f])
 		bc := popcount(blackPawns & fileMask[f])
 
 		if wc > 1 {
-			mg -= (wc - 1) * doubledMG
-			eg -= (wc - 1) * doubledEG
+			mg -= (wc - 1) * p.Doubled.MG
+			eg -= (wc - 1) * p.Doubled.EG
 		}
 		if bc > 1 {
-			mg += (bc - 1) * doubledMG
-			eg += (bc - 1) * doubledEG
+			mg += (bc - 1) * p.Doubled.MG
+			eg += (bc - 1) * p.Doubled.EG
 		}
 		if wc > 0 && whitePawns&adjFilesMask[f] == 0 {
-			mg -= wc * isolatedMG
-			eg -= wc * isolatedEG
+			mg -= wc * p.Isolated.MG
+			eg -= wc * p.Isolated.EG
 		}
 		if bc > 0 && blackPawns&adjFilesMask[f] == 0 {
-			mg += bc * isolatedMG
-			eg += bc * isolatedEG
+			mg += bc * p.Isolated.MG
+			eg += bc * p.Isolated.EG
 		}
 	}
 
 	for bb := whitePawns; bb != 0; bb &= bb - 1 {
 		sq := bits.TrailingZeros64(uint64(bb))
 		if passedMask[White][sq]&blackPawns == 0 {
-			r := sq / 8
-			mg += passedBonusMG[r]
-			eg += passedBonusEG[r]
+			mg += p.Passed[sq/8].MG
+			eg += p.Passed[sq/8].EG
 		}
 	}
 	for bb := blackPawns; bb != 0; bb &= bb - 1 {
 		sq := bits.TrailingZeros64(uint64(bb))
 		if passedMask[Black][sq]&whitePawns == 0 {
-			r := 7 - sq/8
-			mg -= passedBonusMG[r]
-			eg -= passedBonusEG[r]
+			mg -= p.Passed[7-sq/8].MG
+			eg -= p.Passed[7-sq/8].EG
 		}
 	}
 	return mg, eg
 }
 
-// rookFiles rewards a colour's rooks for standing on open files (no pawns) and semi-open files (no
-// friendly pawns).
-func rookFiles(rooks, ownPawns, enemyPawns Bitboard) (mg, eg int) {
+// rookFiles rewards rooks on open and semi-open files.
+func rookFiles(rooks, ownPawns, enemyPawns Bitboard, p *EvalParams) (mg, eg int) {
 	for bb := rooks; bb != 0; bb &= bb - 1 {
 		f := bits.TrailingZeros64(uint64(bb)) % 8
 		if ownPawns&fileMask[f] != 0 {
 			continue
 		}
 		if enemyPawns&fileMask[f] == 0 {
-			mg += rookOpenMG
-			eg += rookOpenEG
+			mg += p.RookOpen.MG
+			eg += p.RookOpen.EG
 		} else {
-			mg += rookSemiMG
-			eg += rookSemiEG
+			mg += p.RookSemi.MG
+			eg += p.RookSemi.EG
 		}
 	}
 	return mg, eg
 }
 
-// kingSafety scores the pawn cover in front of a king (middlegame only): a bonus per shield pawn, and a
-// penalty for each (semi-)open file beside the king.
-func kingSafety(kingSquare uint8, ownPawns Bitboard, color Color) int {
-	mg := popcount(ownPawns&kingShield[color][kingSquare]) * shieldBonus
+// kingSafety scores the pawn cover in front of a king (middlegame only).
+func kingSafety(kingSquare uint8, ownPawns Bitboard, color Color, p *EvalParams) int {
+	mg := popcount(ownPawns&kingShield[color][kingSquare]) * p.KingShield
 
 	kingFile := int(kingSquare % 8)
 	for df := -1; df <= 1; df++ {
@@ -241,7 +256,7 @@ func kingSafety(kingSquare uint8, ownPawns Bitboard, color Color) int {
 			continue
 		}
 		if ownPawns&fileMask[f] == 0 {
-			mg -= kingOpenFilePenalty
+			mg -= p.KingOpenFile
 		}
 	}
 	return mg

@@ -11,7 +11,25 @@ package position
 // is judged from its own perspective. The king's table is phase-dependent: a "tapered" blend of a
 // middlegame table (hide behind the pawns) and an endgame table (march into the centre), interpolated
 // by how much material is left.
+// EvalComplex is the default evaluator (used by tryhard and, via its overlay, fortress).
 func EvalComplex(pos *Position) int16 {
+	return EvalWith(pos, &DefaultEvalParams)
+}
+
+// MakeEvaluator returns an Evaluator that scores positions with the given parameters. Copy
+// DefaultEvalParams, re-weight the terms you care about (say, KingShield and KingOpenFile to love king
+// safety), and hand the result to a search engine.
+func MakeEvaluator(params EvalParams) Evaluator {
+	p := params // capture by value so later edits to the caller's struct don't change this evaluator
+	return func(pos *Position) int16 {
+		return EvalWith(pos, &p)
+	}
+}
+
+// EvalWith evaluates a position with explicit parameters: material and the piece-square tables, plus
+// the positional terms in eval_hce.go, blended between middlegame and endgame by game phase. The score
+// is from White's point of view (positive = good for White).
+func EvalWith(pos *Position, params *EvalParams) int16 {
 	var score, kingMG, kingEG int32
 	phase := 0
 
@@ -45,7 +63,7 @@ func EvalComplex(pos *Position) int16 {
 
 	// Positional terms (mobility, pawn structure, king safety, ...) each carry their own middlegame and
 	// endgame value; material and the non-king tables are phase-independent and so contribute to both.
-	posMG, posEG := evalPositional(pos)
+	posMG, posEG := evalPositional(pos, params)
 	mg := score + kingMG + int32(posMG)
 	eg := score + kingEG + int32(posEG)
 
