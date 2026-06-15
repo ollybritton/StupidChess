@@ -1,0 +1,261 @@
+package lichess
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/search"
+)
+
+// reconnectDelay is how long to wait before reopening the event stream after it drops.
+const reconnectDelay = 5 * time.Second
+
+// errGameOver is a sentinel used to stop reading a game stream once the game has finished.
+var errGameOver = errors.New("game over")
+
+// Bot connects an engine to Lichess: it streams events, accepts challenges per its policy, and plays
+// each game by driving a fresh Mover.
+type Bot struct {
+	client   *Client
+	newMover func(gameID string) (Mover, error)
+
+	// Accept decides whether to take an incoming challenge. Defaults to AcceptStandard.
+	Accept func(Challenge) bool
+	// Greeting, if non-empty, is sent once in the player chat at the start of each game.
+	Greeting string
+	// Logf logs progress. Defaults to a no-op.
+	Logf func(format string, args ...interface{})
+
+	me string // lowercased account id, learned at startup
+}
+
+// NewBot builds a bot that drives games with movers from newMover (one per game).
+func NewBot(client *Client, newMover func(gameID string) (Mover, error)) *Bot {
+	return &Bot{
+		client:   client,
+		newMover: newMover,
+		Accept:   AcceptStandard,
+		Logf:     func(string, ...interface{}) {},
+	}
+}
+
+// AcceptStandard accepts standard-chess challenges and declines variants the engines cannot play.
+func AcceptStandard(ch Challenge) bool {
+	return ch.Variant.Key == "" || ch.Variant.Key == "standard"
+}
+
+// Run learns the account identity and then streams events until ctx is cancelled, reconnecting if the
+// stream drops.
+func (b *Bot) Run(ctx context.Context) error {
+	acct, err := b.client.Account(ctx)
+	if err != nil {
+		return err
+	}
+	b.me = strings.ToLower(acct.ID)
+	b.Logf("connected to Lichess as %s", acct.Username)
+
+	for {
+		err := b.streamEvents(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		b.Logf("event stream ended (%v); reconnecting in %s", err, reconnectDelay)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(reconnectDelay):
+		}
+	}
+}
+
+func (b *Bot) streamEvents(ctx context.Context) error {
+	body, err := b.client.StreamEvents(ctx)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+
+	return streamNDJSON(body, func(line []byte) error {
+		var ev Event
+		if err := json.Unmarshal(line, &ev); err != nil {
+			b.Logf("skipping malformed event: %v", err)
+			return nil
+		}
+
+		switch ev.Type {
+		case "challenge":
+			b.handleChallenge(ctx, ev.Challenge)
+		case "gameStart":
+			go b.playGame(ctx, ev.Game.ID)
+		}
+		return nil
+	})
+}
+
+func (b *Bot) handleChallenge(ctx context.Context, ch Challenge) {
+	// Ignore our own outgoing challenges echoed back to us.
+	if strings.ToLower(ch.Challenger.ID) == b.me {
+		return
+	}
+
+	if b.Accept != nil && b.Accept(ch) {
+		if err := b.client.AcceptChallenge(ctx, ch.ID); err != nil {
+			b.Logf("could not accept challenge %s: %v", ch.ID, err)
+			return
+		}
+		b.Logf("accepted challenge %s from %s (%s %s)", ch.ID, ch.Challenger.Name, ch.Speed, ch.Variant.Key)
+		return
+	}
+
+	if err := b.client.DeclineChallenge(ctx, ch.ID, "generic"); err != nil {
+		b.Logf("could not decline challenge %s: %v", ch.ID, err)
+		return
+	}
+	b.Logf("declined challenge %s from %s (%s)", ch.ID, ch.Challenger.Name, ch.Variant.Key)
+}
+
+// playGame drives one game from start to finish on its own goroutine and engine.
+func (b *Bot) playGame(ctx context.Context, gameID string) {
+	mover, err := b.newMover(gameID)
+	if err != nil {
+		b.Logf("game %s: could not start engine: %v", gameID, err)
+		return
+	}
+	defer mover.Close()
+
+	body, err := b.client.StreamGame(ctx, gameID)
+	if err != nil {
+		b.Logf("game %s: could not open stream: %v", gameID, err)
+		return
+	}
+	defer body.Close()
+
+	var (
+		myColor    position.Color
+		initialFEN = position.StartingPosition
+		greeted    bool
+	)
+
+	err = streamNDJSON(body, func(line []byte) error {
+		var env envelope
+		if err := json.Unmarshal(line, &env); err != nil {
+			return nil
+		}
+
+		switch env.Type {
+		case "gameFull":
+			var gf GameFull
+			if err := json.Unmarshal(line, &gf); err != nil {
+				return nil
+			}
+			initialFEN = resolveFEN(gf.InitialFEN)
+			myColor = b.colorIn(gf)
+			b.Logf("game %s: playing as %s", gameID, myColor)
+
+			if b.Greeting != "" && !greeted {
+				greeted = true
+				if err := b.client.Chat(ctx, gameID, "player", b.Greeting); err != nil {
+					b.Logf("game %s: could not send greeting: %v", gameID, err)
+				}
+			}
+			return b.onState(ctx, gameID, mover, initialFEN, myColor, gf.State)
+
+		case "gameState":
+			var st GameState
+			if err := json.Unmarshal(line, &st); err != nil {
+				return nil
+			}
+			return b.onState(ctx, gameID, mover, initialFEN, myColor, st)
+		}
+		return nil
+	})
+
+	if err != nil && !errors.Is(err, errGameOver) {
+		b.Logf("game %s: stream error: %v", gameID, err)
+	}
+	b.Logf("game %s: finished", gameID)
+}
+
+// onState reacts to a game snapshot: if the game is over it stops; if it is our turn it computes and
+// plays a move.
+func (b *Bot) onState(ctx context.Context, gameID string, mover Mover, initialFEN string, myColor position.Color, st GameState) error {
+	if st.Status != "" && st.Status != "started" {
+		b.Logf("game %s: over (%s)", gameID, st.Status)
+		return errGameOver
+	}
+
+	moves := splitMoves(st.Moves)
+	if sideToMove(initialFEN, len(moves)) != myColor {
+		return nil // not our turn
+	}
+
+	uci, err := mover.Move(initialFEN, moves, clockOptions(st))
+	if err != nil {
+		b.Logf("game %s: engine error: %v", gameID, err)
+		return nil
+	}
+	if uci == "" || uci == "0000" {
+		return nil // no move (game already decided)
+	}
+
+	if err := b.client.MakeMove(ctx, gameID, uci); err != nil {
+		b.Logf("game %s: could not play %s: %v", gameID, uci, err)
+		return nil
+	}
+	b.Logf("game %s: played %s", gameID, uci)
+	return nil
+}
+
+// colorIn reports which colour we are playing in a game.
+func (b *Bot) colorIn(gf GameFull) position.Color {
+	if strings.ToLower(gf.White.ID) == b.me {
+		return position.White
+	}
+	return position.Black
+}
+
+// resolveFEN turns Lichess's initialFen ("startpos" or a FEN) into a concrete FEN.
+func resolveFEN(initialFEN string) string {
+	if initialFEN == "" || initialFEN == "startpos" {
+		return position.StartingPosition
+	}
+	return initialFEN
+}
+
+// splitMoves splits the space-separated UCI move list, returning an empty slice for an empty string.
+func splitMoves(moves string) []string {
+	return strings.Fields(moves)
+}
+
+// sideToMove returns whose turn it is after moveCount half-moves from a position whose FEN names the
+// side that starts.
+func sideToMove(initialFEN string, moveCount int) position.Color {
+	start := position.White
+	if fields := strings.Fields(initialFEN); len(fields) >= 2 && fields[1] == "b" {
+		start = position.Black
+	}
+	if moveCount%2 == 1 {
+		return start.Invert()
+	}
+	return start
+}
+
+// clockOptions builds search options from a game state's clocks, so time-managing engines (tryhard)
+// can pace themselves. Engines that ignore time are unaffected.
+func clockOptions(st GameState) search.SearchOptions {
+	opts := search.NewDeafultOptions()
+	if st.WTime > 0 {
+		opts.WhiteTimeRemaining = time.Duration(st.WTime) * time.Millisecond
+	}
+	if st.BTime > 0 {
+		opts.BlackTimeRemaining = time.Duration(st.BTime) * time.Millisecond
+	}
+	opts.WhiteIncrement = time.Duration(st.WInc) * time.Millisecond
+	opts.BlackIncrement = time.Duration(st.BInc) * time.Millisecond
+	return opts
+}
