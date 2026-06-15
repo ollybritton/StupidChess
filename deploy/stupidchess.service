@@ -1,0 +1,24 @@
+# systemd unit for the StupidChess web UI. Install to /etc/systemd/system/stupidchess.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stupidchess
+#
+# The binary self-spawns engine subprocesses (stupidchess uci -e <name>), so the same executable must
+# be on disk and executable. It binds localhost only; Caddy reverse-proxies to it (see web/Caddyfile).
+
+[Unit]
+Description=StupidChess web UI (engine lab)
+After=network.target
+
+[Service]
+Type=simple
+User=olly
+Group=olly
+ExecStart=/home/olly/bin/stupidchess serve --host 127.0.0.1 -p 8099
+Restart=on-failure
+RestartSec=3
+
+# Light hardening: the process needs no privileges and writes nothing to disk.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

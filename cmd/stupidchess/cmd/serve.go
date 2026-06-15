@@ -80,6 +80,7 @@ var serveCmd = &cobra.Command{
 	Short: "start the web UI for playing and debugging engines",
 	Long:  `Serve a Lichess-style web interface for playing the engines, watching them play each other, and inspecting their search.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		host, _ := cmd.Flags().GetString("host")
 		port, _ := cmd.Flags().GetString("port")
 		custom, _ := cmd.Flags().GetStringArray("uci-engine")
 
@@ -101,13 +102,14 @@ var serveCmd = &cobra.Command{
 
 		server := web.NewServer(specs)
 
-		fmt.Printf("StupidChess web UI on http://localhost:%s\n", port)
+		addr := host + ":" + port
+		fmt.Printf("StupidChess web UI on http://%s\n", addr)
 		if len(external) > 0 {
 			fmt.Printf("external UCI engines available: %s\n", strings.Join(external, ", "))
 		} else {
 			fmt.Println("no external UCI engines found (install stockfish, or use --uci-engine name=path)")
 		}
-		if err := http.ListenAndServe(":"+port, server.Handler()); err != nil {
+		if err := http.ListenAndServe(addr, server.Handler()); err != nil {
 			fmt.Println("server error:", err)
 			os.Exit(1)
 		}
@@ -115,6 +117,9 @@ var serveCmd = &cobra.Command{
 }
 
 func init() {
+	// Bind to localhost by default: in production the server sits behind a reverse proxy (Caddy) and
+	// should not be reachable directly. Pass --host 0.0.0.0 to expose it on the network.
+	serveCmd.Flags().String("host", "127.0.0.1", "address to bind (use 0.0.0.0 to expose on the network)")
 	serveCmd.Flags().StringP("port", "p", "8080", "port to listen on")
 	serveCmd.Flags().StringArray("uci-engine", nil, "register an external UCI engine as name=path (repeatable)")
 	rootCmd.AddCommand(serveCmd)

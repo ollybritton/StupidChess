@@ -55,10 +55,17 @@ const ui = {
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const RANKS = ["1", "2", "3", "4", "5", "6", "7", "8"];
 
-// Pieces are SVGs (the cburnett set) served from /pieces/<color><LETTER>.svg,
-// e.g. /pieces/wN.svg. Swap the whole set by replacing the files in web/static/pieces.
+// Resolve all server URLs relative to the page so the app works both at the site root (local
+// `stupidchess serve`) and under a subpath behind a reverse proxy (e.g. /stupidchess/). The reverse
+// proxy must redirect to a trailing slash so the document base is the app's directory.
+function serverURL(path) {
+  return new URL(path, new URL(".", document.baseURI)).href;
+}
+
+// Pieces are SVGs (the cburnett set) served from pieces/<color><LETTER>.svg, e.g. pieces/wN.svg.
+// Swap the whole set by replacing the files in web/static/pieces.
 function pieceSrc(p) {
-  return "/pieces/" + p.color + p.type.toUpperCase() + ".svg";
+  return serverURL("pieces/" + p.color + p.type.toUpperCase() + ".svg");
 }
 
 const $ = (sel) => document.querySelector(sel);
@@ -763,7 +770,7 @@ function closePromotion() {
 // --- outgoing actions ---
 async function post(action, body) {
   try {
-    const res = await fetch("/api/" + action, {
+    const res = await fetch(serverURL("api/" + action), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
@@ -793,7 +800,7 @@ function sendMove(from, to, promotion) {
 let evtSource = null;
 
 function connect() {
-  evtSource = new EventSource("/api/events");
+  evtSource = new EventSource(serverURL("api/events"));
 
   evtSource.onopen = () => renderConnection(true);
 
