@@ -51,11 +51,25 @@ type AlphaBetaSearch struct {
 	// avoid) draws.
 	gameHistory []uint64
 	pathHashes  []uint64
+
+	// Move-ordering memory, reset per search. killers[ply] are two quiet moves that recently caused a
+	// beta cutoff at that ply (tried early in sibling nodes); history[color][from][to] accumulates how
+	// often a quiet move caused a cutoff (used to order the remaining quiet moves). Good ordering is what
+	// makes alpha-beta (and the pruning below) actually pay off.
+	killers [maxPlies][2]position.Move
+	history [2][64][64]int32
 }
 
 // drawScore is the value of a draw (by repetition or the fifty-move rule). Scoring it 0 means a winning
 // engine (eval > 0) steers away from draws and a losing one steers toward them.
 const drawScore int16 = 0
+
+// maxPlies bounds ply-indexed tables. It is larger than maxSearchDepth to leave room for extensions.
+const maxPlies = 128
+
+// maxMoves is a safe upper bound on legal moves in a position (the real maximum is 218), used to size a
+// per-node ordering scratch array on the stack.
+const maxMoves = 256
 
 // stopped reports whether the search has been asked to abort.
 func (s *AlphaBetaSearch) stopped() bool {
@@ -105,7 +119,7 @@ func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs pos
 		evalUs:     evalUs,
 		evalThem:   evalThem,
 		tt:         newTranspositionTable(),
-		pathHashes: make([]uint64, maxSearchDepth+2),
+		pathHashes: make([]uint64, maxPlies),
 	}
 }
 
@@ -140,6 +154,13 @@ func (s *AlphaBetaSearch) Root() error {
 		// starts at the root's children, ply 1, so a child that returns to the root must see it here).
 		s.gameHistory = s.options.History
 		s.pathHashes[0] = pos.ZobristHash()
+
+		// Fresh move-ordering memory for this move (it carries over across deepening iterations, which is
+		// the point, but not across moves where it would be stale).
+		for i := range s.killers {
+			s.killers[i][0], s.killers[i][1] = position.NoMove, position.NoMove
+		}
+		s.history = [2][64][64]int32{}
 
 		var timeRemaining, increment time.Duration
 
@@ -320,6 +341,71 @@ func (s *AlphaBetaSearch) isRepetition(hash uint64, ply, halfmoveClock int) bool
 // sequences. Captures alone are self-terminating (material is finite), but check chains may not be.
 const maxQuiescencePly = 64
 
+// pieceOrderValue is a small centipawn-ish table for move ordering (MVV-LVA), indexed by Piece.
+var pieceOrderValue = [7]int{
+	position.Pawn: 100, position.Knight: 320, position.Bishop: 330,
+	position.Rook: 500, position.Queen: 900, position.King: 0,
+}
+
+// Move-ordering score bands, from best to worst. Captures and promotions are ordered above the killers,
+// which are above quiet moves ordered by history.
+const (
+	scoreTT      = 1 << 24
+	scoreCapture = 1 << 20
+	scorePromo   = 1 << 19
+	scoreKiller1 = (1 << 18) + 1
+	scoreKiller2 = 1 << 18
+)
+
+// sameMove compares two moves by their from/to/promotion only, ignoring the prior-state bits packed
+// into a Move (which differ between positions), so a move remembered in one node matches the same move
+// generated in another.
+func sameMove(a, b position.Move) bool {
+	return a.From() == b.From() && a.To() == b.To() && a.Promotion() == b.Promotion()
+}
+
+// isQuiet reports whether a move is neither a capture nor a promotion (only quiet moves feed the killer
+// and history tables).
+func isQuiet(m position.Move) bool {
+	return m.Captured() == position.Empty && m.Promotion() == position.None
+}
+
+// scoreMove assigns a move its ordering key.
+func (s *AlphaBetaSearch) scoreMove(m, ttMove position.Move, ply int) int {
+	if ttMove != position.NoMove && sameMove(m, ttMove) {
+		return scoreTT
+	}
+	if captured := m.Captured(); captured != position.Empty {
+		return scoreCapture + pieceOrderValue[captured.Colorless()]*16 - pieceOrderValue[m.Moved().Colorless()]
+	}
+	if m.Promotion() != position.None {
+		return scorePromo
+	}
+	if ply < len(s.killers) {
+		if sameMove(s.killers[ply][0], m) {
+			return scoreKiller1
+		}
+		if sameMove(s.killers[ply][1], m) {
+			return scoreKiller2
+		}
+	}
+	h := int(s.history[m.Moved().Color()][m.From()][m.To()])
+	if h >= scoreKiller2 { // keep quiet moves ordered below the killers
+		h = scoreKiller2 - 1
+	}
+	return h
+}
+
+// recordCutoff rewards a quiet move that caused a beta cutoff: it becomes a killer for this ply and its
+// history score grows with the depth (deeper cutoffs are more valuable).
+func (s *AlphaBetaSearch) recordCutoff(m position.Move, ply int, depth uint) {
+	if ply < len(s.killers) && !sameMove(s.killers[ply][0], m) {
+		s.killers[ply][1] = s.killers[ply][0]
+		s.killers[ply][0] = m
+	}
+	s.history[m.Moved().Color()][m.From()][m.To()] += int32(depth * depth)
+}
+
 func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position) int16 {
 	s.nodeCount++
 
@@ -368,79 +454,67 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	bestScore := position.NoEval
 	bestMove := position.NoMove
 	legalCount := 0
-	cutoff := false
+
+	// Generate, then order: the transposition-table move first, then captures (MVV-LVA), then the two
+	// killer moves, then quiet moves by history score. Legality is checked lazily — MakeMove returns
+	// false when a move leaves our own king in check, which is cheaper than filtering up front.
+	moves := pos.MovesPseudolegal().AsSlice()
+	var scores [maxMoves]int
+	for i := range moves {
+		scores[i] = s.scoreMove(moves[i], ttMove, ply)
+	}
 
 	var childPV pvList
 
-	// Stage 1: search the transposition-table move before generating anything. During iterative
-	// deepening it is frequently the best move and produces an immediate cutoff, in which case the
-	// whole move list never has to be generated or ordered. Equal hashes guarantee the stored move's
-	// prior-state bits are valid here, so MakeMove/UndoMove round-trip correctly.
-	if ttMove != position.NoMove && pos.MakeMove(ttMove) {
+	for i := 0; i < len(moves); i++ {
+		// Selection sort: pull the best-scored remaining move to the front. This is cheaper than fully
+		// sorting because most nodes cut off after a few moves.
+		bestIdx := i
+		for j := i + 1; j < len(moves); j++ {
+			if scores[j] > scores[bestIdx] {
+				bestIdx = j
+			}
+		}
+		moves[i], moves[bestIdx] = moves[bestIdx], moves[i]
+		scores[i], scores[bestIdx] = scores[bestIdx], scores[i]
+		move := moves[i]
+
+		if !pos.MakeMove(move) {
+			continue // illegal: this move left our king in check
+		}
 		legalCount++
+
 		childPV.clear()
 		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
-		pos.UndoMove(ttMove)
+		pos.UndoMove(move)
 
-		bestScore = score
-		bestMove = ttMove
-		pv.catenate(ttMove, &childPV)
+		if score > bestScore {
+			bestScore = score
+			bestMove = move
+			pv.catenate(move, &childPV)
+		}
 		if score > alpha {
 			alpha = score
 		}
 		if alpha >= beta {
-			cutoff = true
+			// Beta cutoff. If it was a quiet move, remember it (killer + history) so it is tried earlier
+			// in sibling and future nodes.
+			if isQuiet(move) {
+				s.recordCutoff(move, ply, depth)
+			}
+			break
 		}
-	}
 
-	if !cutoff && s.stopped() {
-		return alpha
-	}
-
-	// Stage 2: generate, order (captures first by MVV-LVA) and search the remaining moves. Legality is
-	// checked lazily — MakeMove returns false when a move leaves our own king in check, which is
-	// cheaper than fully filtering the list up front.
-	if !cutoff {
-		moves := pos.MovesPseudolegal()
-		moves.OrderMVVLVA()
-
-		for _, move := range moves.AsSlice() {
-			if ttMove != position.NoMove &&
-				move.From() == ttMove.From() && move.To() == ttMove.To() && move.Promotion() == ttMove.Promotion() {
-				continue // already searched in stage 1
-			}
-			if !pos.MakeMove(move) {
-				continue // illegal: this move left our king in check
-			}
-			legalCount++
-
-			childPV.clear()
-			score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
-			pos.UndoMove(move)
-
-			if score > bestScore {
-				bestScore = score
-				bestMove = move
-				pv.catenate(move, &childPV)
-			}
-			if score > alpha {
-				alpha = score
-			}
-			if alpha >= beta {
-				break // beta cutoff: the opponent won't allow this line
-			}
-
-			if s.hardTimeUp() {
-				atomic.StoreInt32(&s.stop, 1)
-			}
-			// Honour an explicit node limit (`go nodes N`); the default is math.MaxUint, so it never
-			// fires unless a limit was actually requested.
-			if uint(s.nodeCount) >= s.options.Nodes {
-				atomic.StoreInt32(&s.stop, 1)
-			}
-			if s.stopped() {
-				return alpha // aborted: don't store a partial result
-			}
+		if s.hardTimeUp() {
+			atomic.StoreInt32(&s.stop, 1)
+		}
+		// Honour an explicit node limit (`go nodes N`); the default is math.MaxUint, so it never fires
+		// unless a limit was actually requested.
+		if uint(s.nodeCount) >= s.options.Nodes {
+			atomic.StoreInt32(&s.stop, 1)
+		}
+		if s.stopped() {
+			return alpha // aborted: don't store a partial result
 		}
 	}
 
