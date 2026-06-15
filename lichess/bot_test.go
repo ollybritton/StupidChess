@@ -239,3 +239,58 @@ func TestStartPonder(t *testing.T) {
 	b.startPonder(mover, position.StartingPosition, nil, "e2e4", "", search.NewDeafultOptions(), ps2)
 	assert.False(t, ps2.active, "no prediction means no pondering")
 }
+
+// TestSeekChallengesAnotherBot: seekGame should challenge an online bot other than itself.
+func TestSeekChallengesAnotherBot(t *testing.T) {
+	challenged := make(chan string, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/bot/online", func(w http.ResponseWriter, r *http.Request) {
+		// Includes ourselves (must be skipped) and a real opponent.
+		writeLine(t, w, `{"id":"stupidchess","username":"StupidChess"}`)
+		writeLine(t, w, `{"id":"rivalbot","username":"RivalBot"}`)
+	})
+	mux.HandleFunc("/api/challenge/", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case challenged <- strings.TrimPrefix(r.URL.Path, "/api/challenge/"):
+		default:
+		}
+		fmt.Fprint(w, `{"challenge":{"id":"x"}}`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("test-token")
+	client.baseURL = server.URL
+
+	bot := NewBot(client, func(string) (Mover, error) { return &stubMover{}, nil })
+	bot.me = "stupidchess" // normally learned from /api/account
+
+	bot.seekGame(context.Background())
+
+	select {
+	case who := <-challenged:
+		assert.Equal(t, "RivalBot", who, "should challenge the other bot, never itself")
+	case <-time.After(2 * time.Second):
+		t.Fatal("no challenge was sent")
+	}
+}
+
+// TestOnlineBotsParses: the online-bots stream yields usernames.
+func TestOnlineBotsParses(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/bot/online", func(w http.ResponseWriter, r *http.Request) {
+		writeLine(t, w, `{"id":"a","username":"Alpha"}`)
+		writeLine(t, w, `{"id":"b","username":"Bravo"}`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client := NewClient("test-token")
+	client.baseURL = server.URL
+
+	bots, err := client.OnlineBots(context.Background(), 50)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Alpha", "Bravo"}, bots)
+}

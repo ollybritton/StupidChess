@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -177,6 +178,56 @@ func (c *Client) Chat(ctx context.Context, gameID, room, text string) error {
 // (POST /api/bot/account/upgrade). It only works on an account that has never played a game.
 func (c *Client) UpgradeToBot(ctx context.Context) error {
 	return c.doAction(ctx, http.MethodPost, "/api/bot/account/upgrade", nil)
+}
+
+// OnlineBots returns up to nb currently-online bots (GET /api/bot/online), as usernames. These are the
+// candidates to challenge so the bot is always playing.
+func (c *Client) OnlineBots(ctx context.Context, nb int) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
+	defer cancel()
+
+	body, err := c.stream(ctx, fmt.Sprintf("/api/bot/online?nb=%d", nb))
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+
+	var bots []string
+	err = streamNDJSON(body, func(line []byte) error {
+		var u struct {
+			Username string `json:"username"`
+		}
+		if json.Unmarshal(line, &u) == nil && u.Username != "" {
+			bots = append(bots, u.Username)
+		}
+		return nil
+	})
+	return bots, err
+}
+
+// ChallengeParams describes a challenge to send to another player.
+type ChallengeParams struct {
+	Rated          bool
+	ClockLimit     time.Duration // initial time
+	ClockIncrement time.Duration // per-move increment
+	Color          string        // "random", "white" or "black" (default "random")
+	Variant        string        // e.g. "standard" (default standard)
+}
+
+// Challenge challenges a user to a game (POST /api/challenge/{username}). It returns once the challenge
+// is created; acceptance arrives later as a gameStart event.
+func (c *Client) Challenge(ctx context.Context, username string, p ChallengeParams) error {
+	form := url.Values{}
+	form.Set("rated", strconv.FormatBool(p.Rated))
+	form.Set("clock.limit", strconv.Itoa(int(p.ClockLimit.Seconds())))
+	form.Set("clock.increment", strconv.Itoa(int(p.ClockIncrement.Seconds())))
+	if p.Color != "" {
+		form.Set("color", p.Color)
+	}
+	if p.Variant != "" {
+		form.Set("variant", p.Variant)
+	}
+	return c.doAction(ctx, http.MethodPost, "/api/challenge/"+username, form)
 }
 
 // streamNDJSON reads a Lichess NDJSON stream line by line, skipping the blank keep-alive lines, and

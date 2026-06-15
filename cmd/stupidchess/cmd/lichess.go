@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/ollybritton/StupidChess/engines"
 	"github.com/ollybritton/StupidChess/lichess"
@@ -62,6 +63,22 @@ var lichessPlayCmd = &cobra.Command{
 			bot.Greeting = greeting
 		}
 
+		// Matchmaking: when --seek is set, the bot challenges online bots so it is almost always playing.
+		bot.Seek, _ = cmd.Flags().GetBool("seek")
+		if mg, _ := cmd.Flags().GetInt("max-games"); mg > 0 {
+			bot.MaxGames = mg
+		}
+		clock, _ := cmd.Flags().GetInt("clock")
+		increment, _ := cmd.Flags().GetInt("increment")
+		rated, _ := cmd.Flags().GetBool("rated")
+		bot.Challenge = lichess.ChallengeParams{
+			Rated:          rated,
+			ClockLimit:     time.Duration(clock) * time.Second,
+			ClockIncrement: time.Duration(increment) * time.Second,
+			Color:          "random",
+			Variant:        "standard",
+		}
+
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer cancel()
 
@@ -106,6 +123,11 @@ func resolveToken(cmd *cobra.Command) string {
 func init() {
 	lichessCmd.PersistentFlags().String("token", "", "Lichess API token (or set LICHESS_TOKEN)")
 	lichessPlayCmd.Flags().String("greeting", "", "chat message to send at the start of each game")
+	lichessPlayCmd.Flags().Bool("seek", false, "continuously challenge online bots so the bot is almost always playing")
+	lichessPlayCmd.Flags().Int("max-games", 1, "maximum games to play at once (with --seek)")
+	lichessPlayCmd.Flags().Int("clock", 180, "initial clock in seconds for challenges sent (with --seek)")
+	lichessPlayCmd.Flags().Int("increment", 2, "clock increment in seconds for challenges sent (with --seek)")
+	lichessPlayCmd.Flags().Bool("rated", false, "send rated challenges (with --seek)")
 
 	lichessCmd.AddCommand(lichessPlayCmd)
 	lichessCmd.AddCommand(lichessUpgradeCmd)

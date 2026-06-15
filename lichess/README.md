@@ -31,6 +31,15 @@ stupidchess lichess play -e soloist
 stupidchess lichess play -e tryhard --greeting "gl hf 🤖"
 ```
 
+Pass `--seek` to have it continuously challenge online bots (from `/api/bot/online`) whenever it has
+fewer than `--max-games` (default 1) games going, so it is almost always playing. The challenges it
+sends use `--clock`/`--increment` (default 3+2) and are casual unless `--rated` is given:
+
+```
+stupidchess lichess play -e tryhard --seek
+stupidchess lichess play -e tryhard --seek --max-games 2 --clock 300 --increment 3 --rated
+```
+
 The bot then:
 
 - accepts standard-chess challenges (and declines variants it can't play),

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
@@ -13,6 +16,13 @@ import (
 
 // reconnectDelay is how long to wait before reopening the event stream after it drops.
 const reconnectDelay = 5 * time.Second
+
+// Matchmaking pacing: how often to consider seeking a game, and how long to wait after sending a
+// challenge before sending another (Lichess expires unaccepted real-time challenges after ~20s).
+const (
+	matchmakeInterval = 10 * time.Second
+	challengeCooldown = 25 * time.Second
+)
 
 // errGameOver is a sentinel used to stop reading a game stream once the game has finished.
 var errGameOver = errors.New("game over")
@@ -30,7 +40,17 @@ type Bot struct {
 	// Logf logs progress. Defaults to a no-op.
 	Logf func(format string, args ...interface{})
 
+	// Seek, when true, makes the bot challenge online bots whenever it has fewer than MaxGames games in
+	// progress, so it is almost always playing. Challenge is the time control / rating it offers.
+	Seek      bool
+	MaxGames  int
+	Challenge ChallengeParams
+
 	me string // lowercased account id, learned at startup
+
+	mu       sync.Mutex      // guards games
+	games    map[string]bool // game ids currently being played
+	lastSeek int64           // unix nanos of the last challenge we sent (atomic)
 }
 
 // NewBot builds a bot that drives games with movers from newMover (one per game).
@@ -40,6 +60,14 @@ func NewBot(client *Client, newMover func(gameID string) (Mover, error)) *Bot {
 		newMover: newMover,
 		Accept:   AcceptStandard,
 		Logf:     func(string, ...interface{}) {},
+		MaxGames: 1,
+		Challenge: ChallengeParams{
+			ClockLimit:     180 * time.Second,
+			ClockIncrement: 2 * time.Second,
+			Color:          "random",
+			Variant:        "standard",
+		},
+		games: map[string]bool{},
 	}
 }
 
@@ -57,6 +85,10 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 	b.me = strings.ToLower(acct.ID)
 	b.Logf("connected to Lichess as %s", acct.Username)
+
+	if b.Seek {
+		go b.matchmake(ctx)
+	}
 
 	for {
 		err := b.streamEvents(ctx)
@@ -91,10 +123,91 @@ func (b *Bot) streamEvents(ctx context.Context) error {
 		case "challenge":
 			b.handleChallenge(ctx, ev.Challenge)
 		case "gameStart":
-			go b.playGame(ctx, ev.Game.ID)
+			b.startGame(ctx, ev.Game.ID)
 		}
 		return nil
 	})
+}
+
+// startGame begins playing a game on its own goroutine, unless one is already in progress for it (the
+// event stream re-sends gameStart for ongoing games when it reconnects, which would otherwise spawn a
+// duplicate engine for the same game).
+func (b *Bot) startGame(ctx context.Context, gameID string) {
+	b.mu.Lock()
+	if b.games[gameID] {
+		b.mu.Unlock()
+		return
+	}
+	b.games[gameID] = true
+	b.mu.Unlock()
+
+	go func() {
+		defer func() {
+			b.mu.Lock()
+			delete(b.games, gameID)
+			b.mu.Unlock()
+		}()
+		b.playGame(ctx, gameID)
+	}()
+}
+
+// gameCount reports how many games are currently in progress.
+func (b *Bot) gameCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.games)
+}
+
+// matchmake periodically challenges an online bot whenever the bot has room for another game, so it is
+// almost always playing.
+func (b *Bot) matchmake(ctx context.Context) {
+	ticker := time.NewTicker(matchmakeInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if b.gameCount() >= b.MaxGames {
+			continue
+		}
+		// Don't pile up challenges: wait for the last one to be accepted or to expire first.
+		if last := atomic.LoadInt64(&b.lastSeek); last != 0 && time.Since(time.Unix(0, last)) < challengeCooldown {
+			continue
+		}
+		b.seekGame(ctx)
+	}
+}
+
+// seekGame challenges a random online bot (other than ourselves).
+func (b *Bot) seekGame(ctx context.Context) {
+	bots, err := b.client.OnlineBots(ctx, 50)
+	if err != nil {
+		b.Logf("matchmaking: could not list online bots: %v", err)
+		return
+	}
+
+	candidates := bots[:0:0]
+	for _, name := range bots {
+		if strings.ToLower(name) != b.me {
+			candidates = append(candidates, name)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+
+	target := candidates[rand.Intn(len(candidates))]
+	atomic.StoreInt64(&b.lastSeek, time.Now().UnixNano())
+
+	if err := b.client.Challenge(ctx, target, b.Challenge); err != nil {
+		b.Logf("matchmaking: could not challenge %s: %v", target, err)
+		return
+	}
+	b.Logf("matchmaking: challenged %s", target)
 }
 
 func (b *Bot) handleChallenge(ctx context.Context, ch Challenge) {
