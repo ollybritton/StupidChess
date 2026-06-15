@@ -7,4 +7,6 @@ var EngineInfo = map[string]Engine{
 	"tryhard":     NewEngineTryHard(),
 	"pawnstar":    NewEnginePawnStar(),
 	"worstfish":   NewEngineWorstfish(),
+	"fortress":    NewEngineFortress(),
+	"soloist":     NewEngineSoloist(),
 }
