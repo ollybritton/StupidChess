@@ -56,6 +56,8 @@ var lichessPlayCmd = &cobra.Command{
 		}
 
 		threads, _ := cmd.Flags().GetInt("threads")
+		syzygyPath, _ := cmd.Flags().GetString("syzygy-path")
+		evalFile, _ := cmd.Flags().GetString("eval-file")
 
 		client := lichess.NewClient(token)
 		bot := lichess.NewBot(client, func(gameID string) (lichess.Mover, error) {
@@ -65,6 +67,12 @@ var lichessPlayCmd = &cobra.Command{
 			}
 			if threads > 1 {
 				_ = m.SetOption("Threads", strconv.Itoa(threads)) // Lazy SMP
+			}
+			if syzygyPath != "" {
+				_ = m.SetOption("SyzygyPath", syzygyPath) // endgame tablebases
+			}
+			if evalFile != "" {
+				_ = m.SetOption("EvalFile", evalFile) // NNUE network
 			}
 			return m, nil
 		})
@@ -139,6 +147,8 @@ func init() {
 	lichessPlayCmd.Flags().Int("increment", 2, "clock increment in seconds for challenges sent (with --seek)")
 	lichessPlayCmd.Flags().Bool("rated", false, "send rated challenges (with --seek)")
 	lichessPlayCmd.Flags().Int("threads", 1, "search threads per game (Lazy SMP)")
+	lichessPlayCmd.Flags().String("syzygy-path", "", "directory of Syzygy endgame tablebases (enables tablebase probing)")
+	lichessPlayCmd.Flags().String("eval-file", "", "NNUE network file to use instead of the hand-crafted evaluation")
 
 	lichessCmd.AddCommand(lichessPlayCmd)
 	lichessCmd.AddCommand(lichessUpgradeCmd)

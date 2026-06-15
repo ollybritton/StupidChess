@@ -2,11 +2,13 @@ package search
 
 import (
 	"fmt"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ollybritton/StupidChess/position"
+	"github.com/ollybritton/StupidChess/syzygy"
 )
 
 // shared holds the state common to every worker of one parallel (Lazy SMP) search: the stop flag, the
@@ -42,6 +44,10 @@ type AlphaBetaSearch struct {
 	// aren't re-searched and the best move from a prior search is tried first. It is shared by all
 	// workers (a pointer, so copying the struct shares it). nil disables it.
 	tt *transpositionTable
+
+	// tb, if non-nil, is a Syzygy endgame tablebase: positions with few enough pieces are probed for an
+	// exact win/draw/loss, truncating the search with perfect endgame knowledge. Shared by all workers.
+	tb *syzygy.Tablebases
 
 	us       position.Color
 	evalUs   position.Evaluator
@@ -113,6 +119,23 @@ func (s *AlphaBetaSearch) SetThreads(n int) {
 	}
 	atomic.StoreInt32(&s.threads, int32(n))
 }
+
+// SetEvaluator swaps the evaluation functions (e.g. to switch from the hand-crafted eval to an NNUE
+// network, or back). Call it between searches; the workers copy the evaluators at the start of a search.
+func (s *AlphaBetaSearch) SetEvaluator(evalUs, evalThem position.Evaluator) {
+	s.evalUs, s.evalThem = evalUs, evalThem
+}
+
+// SetTablebases installs (or clears, with nil) the Syzygy tablebases used to truncate the search in
+// endgames with perfect knowledge.
+func (s *AlphaBetaSearch) SetTablebases(tb *syzygy.Tablebases) {
+	s.tb = tb
+}
+
+// tbWinScore is the value of a tablebase win. It sits above any ordinary evaluation (evalLimit, 20000)
+// but below a real forced mate (mateScoreBound, 29000), so a found mate is still preferred, and the
+// per-ply decrement nudges the engine toward reaching the won position sooner.
+const tbWinScore = 28000
 
 // maxSearchDepth caps iterative deepening. It is far beyond what this engine reaches in practice; it
 // exists so a ponder/infinite search (which has no clock) cannot loop on the uint depth counter.
@@ -495,6 +518,25 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	}
 	if ply < len(s.pathHashes) {
 		s.pathHashes[ply] = hash // record this node so deeper nodes can detect a repetition back to it
+	}
+
+	// Syzygy tablebases: in an endgame with few enough pieces the exact result is known, so we can stop
+	// here with perfect knowledge instead of searching on. A win/loss is scored just under a real mate
+	// (and nearer the root scores higher, to make progress); cursed wins / blessed losses depend on the
+	// fifty-move counter, so they are treated conservatively as draws.
+	if s.tb != nil && ply > 0 {
+		if bits.OnesCount64(uint64(pos.Occupied[position.White]|pos.Occupied[position.Black])) <= s.tb.MaxPieces() {
+			if wdl, ok := s.tb.ProbeWDL(pos); ok {
+				switch {
+				case wdl >= 2:
+					return tbWinScore - int16(ply)
+				case wdl <= -2:
+					return -tbWinScore + int16(ply)
+				default:
+					return drawScore
+				}
+			}
+		}
 	}
 
 	// At the horizon, resolve outstanding captures with a quiescence search before evaluating, so the
