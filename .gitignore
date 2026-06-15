@@ -103,3 +103,8 @@ profiles/
 
 # Lichess bot token (secret, never commit)
 token.txt
+
+# Large/derived assets (the small syzygy testdata/ fixtures ARE committed so the tests run on a clone).
+*.nnue
+nnue-data.txt
+reference/
