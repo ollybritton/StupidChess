@@ -16,7 +16,7 @@ func fixedDepthScore(t *testing.T, fen string, depth uint, useTT bool) int16 {
 		s.tt = nil
 	}
 	var pv pvList
-	return s.search(position.MinEval, position.MaxEval, depth, 0, &pv, pos)
+	return s.search(position.MinEval, position.MaxEval, depth, 0, &pv, pos, position.NoMove, position.NoMove)
 }
 
 // TestTranspositionTableDoesNotCorruptScore: with the table on or off, a fixed-depth search must

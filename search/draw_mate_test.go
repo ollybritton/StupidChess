@@ -39,7 +39,7 @@ func TestMateScoreIsCached(t *testing.T) {
 	require.NoError(t, err)
 
 	var pv pvList
-	score := s.search(position.MinEval, position.MaxEval, 3, 0, &pv, pos)
+	score := s.search(position.MinEval, position.MaxEval, 3, 0, &pv, pos, position.NoMove, position.NoMove)
 	require.Greater(t, score, mateScoreBound, "should have found the mate")
 
 	_, ttScore, _, _, ok := s.tt.probe(pos.ZobristHash())
@@ -74,6 +74,6 @@ func TestFiftyMoveRuleIsDraw(t *testing.T) {
 	require.NoError(t, err)
 
 	var pv pvList
-	score := s.search(position.MinEval, position.MaxEval, 4, 1, &pv, pos)
+	score := s.search(position.MinEval, position.MaxEval, 4, 1, &pv, pos, position.NoMove, position.NoMove)
 	assert.Equal(t, drawScore, score, "the fifty-move rule should make this a draw despite the extra queen")
 }

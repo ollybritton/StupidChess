@@ -22,7 +22,7 @@ func searchScore(t *testing.T, fen string, depth uint) int16 {
 	pos, err := position.NewPositionFromFEN(fen)
 	assert.NoError(t, err)
 	var pv pvList
-	return newTestSearch().search(position.MinEval, position.MaxEval, depth, 0, &pv, pos)
+	return newTestSearch().search(position.MinEval, position.MaxEval, depth, 0, &pv, pos, position.NoMove, position.NoMove)
 }
 
 // TestQuiescenceSeesRecapture: a depth-1 search must not believe that capturing a DEFENDED queen wins

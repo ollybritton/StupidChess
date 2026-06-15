@@ -3,6 +3,7 @@ package search
 import (
 	"fmt"
 	"math/bits"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,6 +11,19 @@ import (
 	"github.com/ollybritton/StupidChess/nnue"
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/syzygy"
+)
+
+// Search-feature toggles, default on, each disabled by setting the matching environment variable. They
+// exist so the self-play harness can A/B a single feature: build one binary, set the var for one side
+// (the baseline binary ignores it), and measure the difference. Read once at start-up.
+var (
+	enableContHist  = os.Getenv("SC_NO_CONTHIST") == ""
+	enableIIR       = os.Getenv("SC_NO_IIR") == ""
+	enableImproving = os.Getenv("SC_NO_IMPROVING") == ""
+	enableSingular  = os.Getenv("SC_NO_SINGULAR") == ""
+	// Correction history measured slightly negative against the hand-crafted eval and needs tuning, so it
+	// is off unless explicitly enabled. The implementation and toggle are kept for that tuning work.
+	enableCorrHist = os.Getenv("SC_CORRHIST") != ""
 )
 
 // shared holds the state common to every worker of one parallel (Lazy SMP) search: the stop flag, the
@@ -79,8 +93,42 @@ type AlphaBetaSearch struct {
 	killers [maxPlies][2]position.Move
 	history [2][64][64]int32
 
+	// contHist is continuation (counter-move) history: contHist[prevPiece][prevTo][movedPiece][to]
+	// scores how often a quiet move caused a cutoff when it followed a given previous move. It captures
+	// move pairs that plain history misses (a reply that refutes a specific move), and is the largest
+	// remaining move-ordering signal. It is a heap pointer so the per-worker struct copy stays cheap; nil
+	// disables it. Per-worker, like the other ordering tables.
+	contHist *contHistTable
+
+	// stackEval[ply] is the static evaluation recorded at each node of the current line (NoEval in check),
+	// used by the "improving" heuristic: if our eval is higher than it was two plies ago, the position is
+	// trending our way and late-move pruning can be less aggressive. Per-worker, allocated like pathHashes.
+	stackEval []int16
+
+	// corrHist corrects the static eval from the running record of how search results have differed from
+	// it for a given pawn structure. nil disables it. Per-worker, like the other tables.
+	corrHist *corrHistTable
+
 	rootDepth uint // the depth of the current iterative-deepening iteration (bounds extensions)
 }
+
+// contHistTable is indexed [previous moved piece][previous to][moved piece][to]. The piece indices are
+// position.ColoredPiece values (0..11); kings included, Empty excluded (a real move always moves a real
+// piece). ~2.4 MB, allocated per worker per search.
+type contHistTable [12][64][12][64]int32
+
+// corrHistTable holds static-evaluation corrections keyed by [side to move][pawn-structure hash]. It
+// records how the search result has historically differed from the raw static eval in positions with a
+// given pawn skeleton, and nudges the static eval toward that, so the pruning heuristics work from a
+// better-calibrated number. ~130 KB, allocated per worker per search.
+type corrHistTable [2][corrHistSize]int32
+
+const (
+	corrHistSize      = 1 << 14 // pawn-hash buckets per side
+	corrHistGrain     = 256     // fixed-point scale: stored corrections are centipawns * 256
+	corrHistMax       = corrHistGrain * 64 // cap the correction at +/- 64 cp
+	corrHistWeightMax = 16                 // fastest adaptation weight (out of corrHistGrain) at high depth
+)
 
 // drawScore is the value of a draw (by repetition or the fifty-move rule). Scoring it 0 means a winning
 // engine (eval > 0) steers away from draws and a losing one steers toward them.
@@ -297,6 +345,16 @@ func (s *AlphaBetaSearch) Root() error {
 				w.pathHashes[0] = pos.ZobristHash()
 				w.killers = [maxPlies][2]position.Move{}
 				w.history = [2][64][64]int32{}
+				if enableContHist {
+					w.contHist = new(contHistTable)
+				}
+				if enableCorrHist {
+					w.corrHist = new(corrHistTable)
+				}
+				w.stackEval = make([]int16, maxPlies)
+				for i := range w.stackEval {
+					w.stackEval[i] = position.NoEval
+				}
 				w.nodeCount = 0
 
 				board := pos.Clone()
@@ -361,7 +419,7 @@ func (s *AlphaBetaSearch) iterativeDeepen(pos *position.Position, isMain bool) (
 			if !s.makeMove(pos, move) {
 				continue
 			}
-			score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos)
+			score := -s.search(-beta, -alpha, depth-1, 1, &childPV, pos, move, position.NoMove)
 			s.undoMove(pos, move)
 
 			if s.stopped() {
@@ -490,8 +548,26 @@ func isQuiet(m position.Move) bool {
 	return m.Captured() == position.Empty && m.Promotion() == position.None
 }
 
-// scoreMove assigns a move its ordering key.
-func (s *AlphaBetaSearch) scoreMove(m position.Move, ttMove compactMove, ply int) int {
+// contHistScore returns the continuation-history score for playing m after prevMove (0 when continuation
+// history is disabled or there is no previous move, e.g. after a null move or at the root).
+func (s *AlphaBetaSearch) contHistScore(prevMove, m position.Move) int32 {
+	if s.contHist == nil || prevMove == position.NoMove {
+		return 0
+	}
+	return s.contHist[prevMove.Moved()][prevMove.To()][m.Moved()][m.To()]
+}
+
+// addContHist adds a bonus to the continuation-history entry for m following prevMove.
+func (s *AlphaBetaSearch) addContHist(prevMove, m position.Move, bonus int32) {
+	if s.contHist == nil || prevMove == position.NoMove {
+		return
+	}
+	s.contHist[prevMove.Moved()][prevMove.To()][m.Moved()][m.To()] += bonus
+}
+
+// scoreMove assigns a move its ordering key. prevMove is the move played to reach this node, used for
+// the continuation-history bonus on quiet moves.
+func (s *AlphaBetaSearch) scoreMove(m position.Move, ttMove compactMove, ply int, prevMove position.Move) int {
 	if ttMove.matches(m) {
 		return scoreTT
 	}
@@ -509,7 +585,7 @@ func (s *AlphaBetaSearch) scoreMove(m position.Move, ttMove compactMove, ply int
 			return scoreKiller2
 		}
 	}
-	h := int(s.history[m.Moved().Color()][m.From()][m.To()])
+	h := int(s.history[m.Moved().Color()][m.From()][m.To()]) + int(s.contHistScore(prevMove, m))
 	if h >= scoreKiller2 { // keep quiet moves ordered below the killers
 		h = scoreKiller2 - 1
 	}
@@ -537,16 +613,70 @@ func lmrReduction(depth uint, moveCount int) uint {
 }
 
 // recordCutoff rewards a quiet move that caused a beta cutoff: it becomes a killer for this ply and its
-// history score grows with the depth (deeper cutoffs are more valuable).
-func (s *AlphaBetaSearch) recordCutoff(m position.Move, ply int, depth uint) {
+// history (and continuation history, relative to prevMove) grows with the depth, deeper cutoffs counting
+// for more.
+func (s *AlphaBetaSearch) recordCutoff(m position.Move, ply int, depth uint, prevMove position.Move) {
 	if ply < len(s.killers) && !sameMove(s.killers[ply][0], m) {
 		s.killers[ply][1] = s.killers[ply][0]
 		s.killers[ply][0] = m
 	}
-	s.history[m.Moved().Color()][m.From()][m.To()] += int32(depth * depth)
+	bonus := int32(depth * depth)
+	s.history[m.Moved().Color()][m.From()][m.To()] += bonus
+	s.addContHist(prevMove, m, bonus)
 }
 
-func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position) int16 {
+// search is the negamax core. prevMove is the move played to reach this node (NoMove at the root or after
+// a null move); excluded, when set, is a move to leave out of the search - used by singular-extension
+// verification to ask "is the hash move the only good move here?". An excluded search must not consult or
+// write the transposition table for this node, since the table entry describes the node with that move.
+// pawnStructureKey hashes the two pawn bitboards into a key for the correction-history table, so
+// positions sharing a pawn skeleton share a correction. Cheap: two multiplies and an xor.
+func pawnStructureKey(pos *position.Position) uint64 {
+	wp := uint64(pos.Pieces[position.Pawn] & pos.Occupied[position.White])
+	bp := uint64(pos.Pieces[position.Pawn] & pos.Occupied[position.Black])
+	return wp*0x9E3779B97F4A7C15 ^ (bp*0xC2B2AE3D27D4EB4F + 0x165667B19E3779F9)
+}
+
+// correctedEval adjusts a raw static evaluation by the side-to-move's learned correction for the current
+// pawn structure, clamped to stay clear of mate scores. It is the value the pruning heuristics use.
+func (s *AlphaBetaSearch) correctedEval(pos *position.Position, raw int16) int16 {
+	if s.corrHist == nil {
+		return raw
+	}
+	idx := pawnStructureKey(pos) & (corrHistSize - 1)
+	v := int(raw) + int(s.corrHist[pos.SideToMove][idx]/corrHistGrain)
+	if hi := int(mateScoreBound) - 1; v > hi {
+		v = hi
+	} else if lo := -int(mateScoreBound) + 1; v < lo {
+		v = lo
+	}
+	return int16(v)
+}
+
+// updateCorrHist folds the gap between the search result and the raw static eval into the correction
+// table, as a depth-weighted exponential moving average bounded by corrHistMax. Over time the correction
+// converges on the typical static-eval error for that pawn structure.
+func (s *AlphaBetaSearch) updateCorrHist(pos *position.Position, depth uint, rawStatic, bestScore int16) {
+	if s.corrHist == nil {
+		return
+	}
+	idx := pawnStructureKey(pos) & (corrHistSize - 1)
+	entry := &s.corrHist[pos.SideToMove][idx]
+	diff := int32(bestScore-rawStatic) * corrHistGrain
+	w := int32(depth) + 1
+	if w > corrHistWeightMax {
+		w = corrHistWeightMax
+	}
+	v := (*entry*(corrHistGrain-w) + diff*w) / corrHistGrain
+	if v > corrHistMax {
+		v = corrHistMax
+	} else if v < -corrHistMax {
+		v = -corrHistMax
+	}
+	*entry = v
+}
+
+func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position, prevMove, excluded position.Move) int16 {
 	s.countNode()
 
 	// Safety valve: extensions can push ply past the nominal depth; never run off the end of the
@@ -597,13 +727,22 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	alphaOrig := alpha
 
 	// Probe the transposition table. A stored result searched at least as deep can cut this node off
-	// immediately; otherwise its best move still improves our move ordering.
+	// immediately; otherwise its best move still improves our move ordering. The probe is skipped during a
+	// singular-extension search (the stored entry includes the move we are excluding). The hit details are
+	// kept for the singular test below.
 	var ttMove compactMove
-	if s.tt != nil {
-		if move, score, ttDepth, bound, ok := s.tt.probe(hash); ok {
+	var ttScore int16
+	var ttDepth uint8
+	var ttBound ttBound
+	ttHit := false
+	if s.tt != nil && excluded == position.NoMove {
+		if move, score, d, bound, ok := s.tt.probe(hash); ok {
+			ttHit = true
 			ttMove = move
+			ttScore = scoreFromTT(score, ply)
+			ttDepth = d
+			ttBound = bound
 			if uint(ttDepth) >= depth {
-				ttScore := scoreFromTT(score, ply)
 				switch {
 				case bound == boundExact:
 					return ttScore
@@ -620,11 +759,23 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	isPV := beta-alpha > 1 // a full window means this is a principal-variation node
 
 	// Static evaluation of this node, used by the pruning heuristics below (meaningless in check, where
-	// the side to move may be losing material it is forced to address).
+	// the side to move may be losing material it is forced to address). rawStaticEval is the evaluator's
+	// own number; staticEval is it corrected by the learned pawn-structure correction history.
+	rawStaticEval := position.NoEval
 	staticEval := position.NoEval
 	if !inCheck {
-		staticEval = s.leafEval(pos)
+		rawStaticEval = s.leafEval(pos)
+		staticEval = s.correctedEval(pos, rawStaticEval)
 	}
+
+	// "Improving": is our static eval higher than it was two plies ago (our previous turn)? If so the
+	// position is trending our way and the late-move pruning below can afford to be less aggressive; if
+	// not, we prune sooner. The static eval of each node on the current line is recorded for the lookup.
+	if ply < len(s.stackEval) {
+		s.stackEval[ply] = staticEval
+	}
+	improving := !inCheck && ply >= 2 && ply-2 < len(s.stackEval) &&
+		s.stackEval[ply-2] != position.NoEval && staticEval > s.stackEval[ply-2]
 
 	// Reverse futility pruning (a.k.a. static null move): if our static eval is so far above beta that
 	// even handing back a depth-scaled margin keeps us above beta, assume the search would confirm it
@@ -649,7 +800,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		pos.SideToMove = pos.SideToMove.Invert()
 
 		var nullPV pvList
-		nullScore := -s.search(-beta, -beta+1, depth-1-r, ply+1, &nullPV, pos)
+		nullScore := -s.search(-beta, -beta+1, depth-1-r, ply+1, &nullPV, pos, position.NoMove, position.NoMove)
 
 		pos.SideToMove = pos.SideToMove.Invert()
 		pos.EnPassant = savedEP
@@ -662,6 +813,13 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		}
 	}
 
+	// Internal iterative reduction: with no transposition-table move to lead the ordering, searching at
+	// full depth mostly wastes effort on a badly ordered node. Shave a ply; the shallower search leaves a
+	// hash move behind that orders the (effectively re-searched) node far better.
+	if enableIIR && depth >= 4 && ttMove == 0 && excluded == position.NoMove {
+		depth--
+	}
+
 	bestScore := position.NoEval
 	bestMove := position.NoMove
 	legalCount := 0
@@ -672,7 +830,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	moves := pos.MovesPseudolegal().AsSlice()
 	var scores [maxMoves]int
 	for i := range moves {
-		scores[i] = s.scoreMove(moves[i], ttMove, ply)
+		scores[i] = s.scoreMove(moves[i], ttMove, ply, prevMove)
 	}
 
 	var childPV pvList
@@ -690,16 +848,39 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		scores[i], scores[bestIdx] = scores[bestIdx], scores[i]
 		move := moves[i]
 
+		// During a singular-extension search, leave out the move being tested for singularity.
+		if excluded != position.NoMove && sameMove(move, excluded) {
+			continue
+		}
+
+		// Singular extension: before searching the hash move, test whether it stands alone. Search every
+		// other move (excluding the hash move) to a reduced depth against a window just below the hash
+		// score; if they all fail to reach it, the hash move is "singular" - the line hinges on it - and we
+		// search it one ply deeper. Restricted to deep nodes with a trustworthy lower-bound hash score, and
+		// bounded like the check extension so the tree can't explode.
+		singular := uint(0)
+		if enableSingular && excluded == position.NoMove && ply > 0 && depth >= 8 && ttHit && ttMove.matches(move) &&
+			uint(ttDepth) >= depth-3 && (ttBound == boundLower || ttBound == boundExact) &&
+			int(ttScore) > -int(mateScoreBound) && int(ttScore) < int(mateScoreBound) &&
+			ply < 2*int(s.rootDepth) {
+			singularBeta := ttScore - int16(2*depth)
+			var sePV pvList
+			seScore := s.search(singularBeta-1, singularBeta, (depth-1)/2, ply, &sePV, pos, prevMove, move)
+			if seScore < singularBeta {
+				singular = 1
+			}
+		}
+
 		if !s.makeMove(pos, move) {
 			continue // illegal: this move left our king in check
 		}
 		legalCount++
 
-		// Check extension: a move that gives check usually starts something forcing, so search it a ply
-		// deeper. Bounded by 2x the root depth so a string of checks can't explode the tree.
+		// Extension: a singular hash move, or (failing that) a checking move, is searched a ply deeper.
+		// Bounded by 2x the root depth so a string of forcing moves can't explode the tree.
 		givesCheck := pos.KingInCheck(pos.SideToMove)
-		extension := uint(0)
-		if givesCheck && ply < 2*int(s.rootDepth) {
+		extension := singular
+		if extension == 0 && givesCheck && ply < 2*int(s.rootDepth) {
 			extension = 1
 		}
 		newDepth := depth - 1 + extension
@@ -710,7 +891,15 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		//   - futility pruning: if the static eval plus a depth-scaled margin still can't reach alpha, a
 		//     quiet move is very unlikely to, so skip it.
 		if !isPV && !inCheck && extension == 0 && legalCount > 1 && isQuiet(move) && !givesCheck {
-			if depth <= lmpMaxDepth && legalCount > 3+int(depth*depth) {
+			// Late move pruning: once enough moves have been tried, skip the rest. The base budget is
+			// already tuned, so "improving" only ever relaxes it - when our eval is climbing we search a few
+			// more moves before giving up - rather than pruning harder when it is not (which, measured,
+			// over-prunes badly against this baseline).
+			lmpLimit := 3 + int(depth*depth)
+			if improving && enableImproving {
+				lmpLimit += 2 + int(depth)
+			}
+			if depth <= lmpMaxDepth && legalCount > lmpLimit {
 				s.undoMove(pos, move)
 				continue
 			}
@@ -724,7 +913,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		var score int16
 		if legalCount == 1 {
 			// First (best-ordered) move: search it with the full window to establish the PV.
-			score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos)
+			score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos, move, position.NoMove)
 		} else {
 			// Late move reductions: search a late, quiet, non-checking move shallower first, on a null
 			// window. If it beats alpha we re-search at full depth.
@@ -738,12 +927,12 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 
 			// Null-window scout (Principal Variation Search): we only expect to confirm this move is not
 			// better than the PV move, which a zero-width window decides faster.
-			score = -s.search(-alpha-1, -alpha, newDepth-reduction, ply+1, &childPV, pos)
+			score = -s.search(-alpha-1, -alpha, newDepth-reduction, ply+1, &childPV, pos, move, position.NoMove)
 			if reduction > 0 && score > alpha {
-				score = -s.search(-alpha-1, -alpha, newDepth, ply+1, &childPV, pos) // reduced search surprised us
+				score = -s.search(-alpha-1, -alpha, newDepth, ply+1, &childPV, pos, move, position.NoMove) // reduced search surprised us
 			}
 			if score > alpha && score < beta {
-				score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos) // a real new PV: full window
+				score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos, move, position.NoMove) // a real new PV: full window
 			}
 		}
 		s.undoMove(pos, move)
@@ -760,7 +949,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			// Beta cutoff. If it was a quiet move, remember it (killer + history) so it is tried earlier
 			// in sibling and future nodes.
 			if isQuiet(move) {
-				s.recordCutoff(move, ply, depth)
+				s.recordCutoff(move, ply, depth, prevMove)
 			}
 			break
 		}
@@ -786,9 +975,19 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		return 0 // stalemate; TODO: return a contempt value instead
 	}
 
+	// Correction history: nudge future static evals for this pawn structure toward what the search
+	// actually found here. Skip the noisy cases - in check, a mate score, or a tactical (non-quiet) best
+	// move whose swing says nothing about the positional static eval - and singular searches.
+	if !inCheck && excluded == position.NoMove &&
+		int(bestScore) < int(mateScoreBound) && int(bestScore) > -int(mateScoreBound) &&
+		(bestMove == position.NoMove || isQuiet(bestMove)) {
+		s.updateCorrHist(pos, depth, rawStaticEval, bestScore)
+	}
+
 	// Store the result. Mate scores are rewritten to be relative to this node (scoreToTT) so they remain
-	// correct when the position is transposed to at a different ply.
-	if s.tt != nil {
+	// correct when the position is transposed to at a different ply. A singular search is not stored: its
+	// result describes the node with the hash move removed, not the real node.
+	if s.tt != nil && excluded == position.NoMove {
 		bound := boundExact
 		if bestScore <= alphaOrig {
 			bound = boundUpper
