@@ -111,7 +111,14 @@ func (s *EngineSession) handleCommandUci(arguments []string) error {
 	fmt.Printf("id author %s\n", s.engine.Author())
 
 	for _, opt := range s.engine.Options() {
-		fmt.Printf("option name %s type %s default %s\n", opt.Name, opt.Type, opt.Default)
+		line := fmt.Sprintf("option name %s type %s default %s", opt.Name, opt.Type, opt.Default)
+		if opt.Min != "" {
+			line += " min " + opt.Min
+		}
+		if opt.Max != "" {
+			line += " max " + opt.Max
+		}
+		fmt.Println(line)
 	}
 
 	seed := time.Now().Unix()

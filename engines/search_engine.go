@@ -58,14 +58,21 @@ func (e *searchEngine) Description() string { return e.description }
 func (e *searchEngine) NewGame() error      { return nil }
 func (e *searchEngine) Stop()               { e.searcher.Stop() }
 
-// Options exposes the search engine's standard UCI options. Engines that add their own (e.g. try-hard's
-// OwnBook) should append to these.
+// Options exposes the search engine's standard UCI options, plus the tunable search parameters (so the
+// SPSA tuner can set them via setoption). Engines that add their own (e.g. try-hard's OwnBook) append.
 func (e *searchEngine) Options() []EngineOption {
-	return []EngineOption{
+	opts := []EngineOption{
 		{Name: "Threads", Type: "spin", Default: "1"},
 		{Name: "SyzygyPath", Type: "string", Default: ""},
 		{Name: "EvalFile", Type: "string", Default: ""},
 	}
+	for _, p := range search.TunableParams() {
+		opts = append(opts, EngineOption{
+			Name: p.Name, Type: "spin", Default: strconv.Itoa(p.Default),
+			Min: strconv.Itoa(p.Min), Max: strconv.Itoa(p.Max),
+		})
+	}
+	return opts
 }
 
 func (e *searchEngine) SetOption(name, value string) error {
@@ -78,6 +85,16 @@ func (e *searchEngine) SetOption(name, value string) error {
 		e.setSyzygy(value)
 	case strings.EqualFold(name, "EvalFile"):
 		e.setEvalFile(value)
+	default:
+		// A tunable search parameter (SPSA): forward the integer value to the searcher.
+		for _, p := range search.TunableParams() {
+			if strings.EqualFold(name, p.Name) {
+				if n, err := strconv.Atoi(value); err == nil {
+					e.searcher.SetParam(p.Name, n)
+				}
+				break
+			}
+		}
 	}
 	return nil
 }

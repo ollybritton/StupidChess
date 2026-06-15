@@ -25,6 +25,8 @@ type EngineOption struct {
 	Name    string
 	Type    string // UCI option type, e.g. "check" or "spin"
 	Default string
+	Min     string // for "spin" options, optional
+	Max     string // for "spin" options, optional
 }
 
 // noOptions is embedded by engines that expose no UCI options, so they satisfy the interface for free.

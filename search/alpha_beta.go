@@ -2,6 +2,7 @@ package search
 
 import (
 	"fmt"
+	"math"
 	"math/bits"
 	"os"
 	"sync"
@@ -110,6 +111,10 @@ type AlphaBetaSearch struct {
 	corrHist *corrHistTable
 
 	rootDepth uint // the depth of the current iterative-deepening iteration (bounds extensions)
+
+	// params holds the tunable search constants (pruning margins, LMR shape). A value struct, so it is
+	// copied into each worker by the `w := *s` clone and read lock-free during the search.
+	params searchParams
 }
 
 // contHistTable is indexed [previous moved piece][previous to][moved piece][to]. The piece indices are
@@ -141,16 +146,71 @@ const maxPlies = 128
 // per-node ordering scratch array on the stack.
 const maxMoves = 256
 
-// Pruning margins, in centipawns. These trade a small amount of accuracy for a large reduction in nodes
-// near the leaves. Conservative values so tactics still surface.
+// Depth ceilings for the shallow-only pruning heuristics (in plies). Coarse and left fixed.
 const (
-	rfpMaxDepth      = 6   // reverse futility pruning only at shallow depth
-	rfpMargin        = 80  // per ply of depth
-	futilityMaxDepth = 6   // futility pruning of quiet moves only at shallow depth
-	futilityMargin   = 100 // per ply of depth
-	lmpMaxDepth      = 6   // late move pruning only at shallow depth
-	deltaMargin      = 200 // quiescence delta pruning safety margin
+	rfpMaxDepth      = 6 // reverse futility pruning only at shallow depth
+	futilityMaxDepth = 6 // futility pruning of quiet moves only at shallow depth
+	lmpMaxDepth      = 6 // late move pruning only at shallow depth
 )
+
+// searchParams are the continuous search constants exposed for tuning (e.g. by the SPSA tuner via UCI
+// options). They are copied into each Lazy-SMP worker with the rest of the struct, so a value here is
+// read without synchronisation during a search. Margins are centipawns per ply; the LMR fields are
+// fixed-point (x100) coefficients of the reduction formula. Defaults reproduce the previous behaviour.
+type searchParams struct {
+	lmrBase     int // reduction = lmrBase/100 + ln(depth)*ln(moveCount)/(lmrDiv/100)
+	lmrDiv      int
+	rfpMargin   int // reverse-futility margin per ply of depth
+	futMargin   int // futility margin per ply of depth
+	deltaMargin int // quiescence delta-pruning safety margin
+}
+
+var defaultSearchParams = searchParams{
+	lmrBase:     75,
+	lmrDiv:      225,
+	rfpMargin:   80,
+	futMargin:   100,
+	deltaMargin: 200,
+}
+
+// ParamSpec describes one tunable search parameter: its UCI option name, default, the bounds the tuner
+// must stay within, and the SPSA perturbation size (c) - how far to step it when estimating the gradient.
+type ParamSpec struct {
+	Name    string
+	Default int
+	Min     int
+	Max     int
+	Step    float64
+}
+
+// TunableParams returns the tunable search parameters, in a fixed order shared by the engine's UCI
+// options and the SPSA tuner. The LMR coefficients are fixed-point (x100).
+func TunableParams() []ParamSpec {
+	return []ParamSpec{
+		{"LMRBase", 75, 20, 150, 8},
+		{"LMRDiv", 225, 120, 400, 20},
+		{"RFPMargin", 80, 40, 160, 8},
+		{"FutilityMargin", 100, 50, 220, 10},
+		{"DeltaMargin", 200, 100, 400, 20},
+	}
+}
+
+// SetParam sets a tunable search parameter by its UCI option name. Unknown names are ignored. Call it
+// between searches; the value is picked up by the next search's workers.
+func (s *AlphaBetaSearch) SetParam(name string, value int) {
+	switch name {
+	case "LMRBase":
+		s.params.lmrBase = value
+	case "LMRDiv":
+		s.params.lmrDiv = value
+	case "RFPMargin":
+		s.params.rfpMargin = value
+	case "FutilityMargin":
+		s.params.futMargin = value
+	case "DeltaMargin":
+		s.params.deltaMargin = value
+	}
+}
 
 // stopped reports whether the search has been asked to abort.
 func (s *AlphaBetaSearch) stopped() bool {
@@ -268,6 +328,7 @@ func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs pos
 		evalThem:   evalThem,
 		tt:         newTranspositionTable(),
 		pathHashes: make([]uint64, maxPlies),
+		params:     defaultSearchParams,
 	}
 }
 
@@ -601,15 +662,16 @@ func hasNonPawnMaterial(pos *position.Position, c position.Color) bool {
 
 // lmrReduction is how many plies to shave off a late, quiet move's search. Later moves and deeper nodes
 // are reduced more; the move is re-searched at full depth if the reduced search unexpectedly beats alpha.
-func lmrReduction(depth uint, moveCount int) uint {
-	r := uint(1)
-	if depth >= 6 {
-		r++
+// The shape is the usual logarithmic one, base + ln(depth)*ln(moveCount)/divisor, with the two
+// coefficients exposed for tuning. The reduction is never less than one ply.
+func (s *AlphaBetaSearch) lmrReduction(depth uint, moveCount int) uint {
+	base := float64(s.params.lmrBase) / 100
+	div := float64(s.params.lmrDiv) / 100
+	r := base + math.Log(float64(depth))*math.Log(float64(moveCount))/div
+	if r < 1 {
+		return 1
 	}
-	if moveCount >= 10 {
-		r++
-	}
-	return r
+	return uint(r)
 }
 
 // recordCutoff rewards a quiet move that caused a beta cutoff: it becomes a killer for this ply and its
@@ -781,7 +843,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	// even handing back a depth-scaled margin keeps us above beta, assume the search would confirm it
 	// and prune. Only at shallow non-PV nodes, never near a mate.
 	if !isPV && !inCheck && depth <= rfpMaxDepth && beta < mateScoreBound &&
-		int(staticEval)-rfpMargin*int(depth) >= int(beta) {
+		int(staticEval)-s.params.rfpMargin*int(depth) >= int(beta) {
 		return staticEval
 	}
 
@@ -903,7 +965,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 				s.undoMove(pos, move)
 				continue
 			}
-			if depth <= futilityMaxDepth && int(staticEval)+futilityMargin*int(depth) <= int(alpha) {
+			if depth <= futilityMaxDepth && int(staticEval)+s.params.futMargin*int(depth) <= int(alpha) {
 				s.undoMove(pos, move)
 				continue
 			}
@@ -919,7 +981,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			// window. If it beats alpha we re-search at full depth.
 			reduction := uint(0)
 			if extension == 0 && depth >= 3 && legalCount >= 4 && isQuiet(move) && !inCheck && !givesCheck {
-				reduction = lmrReduction(depth, legalCount)
+				reduction = s.lmrReduction(depth, legalCount)
 				if reduction > newDepth-1 {
 					reduction = newDepth - 1
 				}
@@ -1043,7 +1105,7 @@ func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Posi
 		if !inCheck && move.Promotion() == position.None {
 			// Delta pruning: skip a capture that, even if it won the captured piece for free plus a
 			// margin, still couldn't reach alpha. (Promotions are exempt: they win more.)
-			if int(bestScore)+pieceOrderValue[move.Captured().Colorless()]+deltaMargin < int(alpha) {
+			if int(bestScore)+pieceOrderValue[move.Captured().Colorless()]+s.params.deltaMargin < int(alpha) {
 				continue
 			}
 			// SEE pruning: skip a capture that loses material once the recaptures are played out. These

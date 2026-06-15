@@ -22,4 +22,7 @@ type Searcher interface {
 	SetNNUE(net *nnue.Network)
 	// SetTablebases installs (nil clears) the Syzygy endgame tablebases.
 	SetTablebases(tb *syzygy.Tablebases)
+	// SetParam sets a tunable search parameter by UCI option name (used by the SPSA tuner). Unknown
+	// names are ignored.
+	SetParam(name string, value int)
 }

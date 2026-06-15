@@ -108,3 +108,6 @@ token.txt
 *.nnue
 nnue-data.txt
 reference/
+
+# SPSA tuning checkpoints
+spsa*.json
