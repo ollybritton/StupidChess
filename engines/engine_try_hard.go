@@ -80,7 +80,7 @@ func (e *EngineTryHard) NewGame() error {
 func (e *EngineTryHard) Go(pos *position.Position, options search.SearchOptions) error {
 	// Play instantly from the opening book while still in known theory.
 	if e.useBook {
-		if uci, ok := defaultBook.lookup(pos); ok {
+		if uci, ok := getBook().lookup(pos); ok {
 			if _, legal := bookLegalMove(pos, uci); legal {
 				fmt.Println("info string book move")
 				fmt.Println("bestmove", uci)
