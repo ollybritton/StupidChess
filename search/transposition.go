@@ -55,10 +55,30 @@ func (t *transpositionTable) store(hash uint64, depth uint, score int16, bound t
 	t.entries[idx] = ttEntry{hash: hash, move: move, score: score, depth: uint8(depth), bound: bound}
 }
 
-// isMateScore reports whether a score is a forced-mate score. Mate scores are relative to the ply at
-// which the mate occurs, so storing them in the table (which is ply-agnostic) would be unsound; the
-// search skips the table for them.
-func isMateScore(score int16) bool {
-	const mateThreshold = position.MaxEval - 1000
-	return score > mateThreshold || score < -mateThreshold
+// mateScoreBound is the threshold above (or below) which a score denotes a forced mate.
+const mateScoreBound = position.MaxEval - 1000
+
+// Mate scores encode the distance to mate from the root, so the same position transposed to at a
+// different ply would have an inconsistent score. scoreToTT rewrites a mate score to be relative to the
+// node it is stored at; scoreFromTT undoes that on the way out. Non-mate scores pass through unchanged.
+// Without this the table simply skipped mate scores, so the engine re-found every mate from scratch on
+// each deepening and each move (slow, and it never "remembered" a mate it had already seen).
+func scoreToTT(score int16, ply int) int16 {
+	if score >= mateScoreBound {
+		return score + int16(ply)
+	}
+	if score <= -mateScoreBound {
+		return score - int16(ply)
+	}
+	return score
+}
+
+func scoreFromTT(score int16, ply int) int16 {
+	if score >= mateScoreBound {
+		return score - int16(ply)
+	}
+	if score <= -mateScoreBound {
+		return score + int16(ply)
+	}
+	return score
 }

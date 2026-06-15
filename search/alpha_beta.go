@@ -43,7 +43,19 @@ type AlphaBetaSearch struct {
 	hardDeadline    int64
 	softDeadline    int64
 	plannedMoveTime int64
+
+	// Draw detection. gameHistory holds the Zobrist hashes of the positions played in the actual game
+	// before the root (so a move that repeats one of them can be recognised). pathHashes[ply] holds the
+	// hash of the node currently being searched at that ply, so a repetition back up the search line can
+	// be recognised too. Together with the fifty-move counter this lets the engine see (and, when ahead,
+	// avoid) draws.
+	gameHistory []uint64
+	pathHashes  []uint64
 }
+
+// drawScore is the value of a draw (by repetition or the fifty-move rule). Scoring it 0 means a winning
+// engine (eval > 0) steers away from draws and a losing one steers toward them.
+const drawScore int16 = 0
 
 // stopped reports whether the search has been asked to abort.
 func (s *AlphaBetaSearch) stopped() bool {
@@ -88,11 +100,12 @@ func (s *AlphaBetaSearch) PonderHit() {
 
 func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs position.Evaluator, evalThem position.Evaluator) *AlphaBetaSearch {
 	return &AlphaBetaSearch{
-		requests:  requests,
-		responses: responses,
-		evalUs:    evalUs,
-		evalThem:  evalThem,
-		tt:        newTranspositionTable(),
+		requests:   requests,
+		responses:  responses,
+		evalUs:     evalUs,
+		evalThem:   evalThem,
+		tt:         newTranspositionTable(),
+		pathHashes: make([]uint64, maxSearchDepth+2),
 	}
 }
 
@@ -122,6 +135,11 @@ func (s *AlphaBetaSearch) Root() error {
 		s.nodeCount = 0               // Record number of nodes so we can stop after searching a certain number of nodes
 		s.options = request.options   // Store options in the search struct so we don't have to explicitly pass around.
 		atomic.StoreInt32(&s.stop, 0) // Make sure we don't stop straight away if we were told to stop previously
+
+		// Seed draw detection: the prior game positions, and the root itself at ply 0 (the search proper
+		// starts at the root's children, ply 1, so a child that returns to the root must see it here).
+		s.gameHistory = s.options.History
+		s.pathHashes[0] = pos.ZobristHash()
 
 		var timeRemaining, increment time.Duration
 
@@ -271,12 +289,51 @@ func (s *AlphaBetaSearch) Root() error {
 	return nil
 }
 
+// isRepetition reports whether the current position (hash) has already occurred along the current
+// search line or earlier in the actual game, within the fifty-move window (only moves since the last
+// irreversible one can repeat). A single prior occurrence is treated as a draw: it is the simplest rule
+// that makes a winning engine refuse to repeat, which is exactly what we want. Positions with the wrong
+// side to move have a different hash and so never match, so we can scan every ply.
+func (s *AlphaBetaSearch) isRepetition(hash uint64, ply, halfmoveClock int) bool {
+	scanned := 0
+
+	// Back up the current search line (ply-1, ply-2, ... toward the root).
+	for i := ply - 1; i >= 0 && scanned < halfmoveClock; i-- {
+		if s.pathHashes[i] == hash {
+			return true
+		}
+		scanned++
+	}
+
+	// Then into the game's history before the root.
+	for i := len(s.gameHistory) - 1; i >= 0 && scanned < halfmoveClock; i-- {
+		if s.gameHistory[i] == hash {
+			return true
+		}
+		scanned++
+	}
+
+	return false
+}
+
 // maxQuiescencePly caps quiescence recursion as a safety valve against pathological capture/check
 // sequences. Captures alone are self-terminating (material is finite), but check chains may not be.
 const maxQuiescencePly = 64
 
 func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position) int16 {
 	s.nodeCount++
+
+	hash := pos.ZobristHash()
+
+	// A repeated position, or an expired fifty-move counter, is a draw (but never at the root, where a
+	// move must still be chosen). Scoring it as a draw lets a winning engine steer away from it and a
+	// losing one steer toward it.
+	if ply > 0 && (pos.HalfmoveClock >= 100 || s.isRepetition(hash, ply, int(pos.HalfmoveClock))) {
+		return drawScore
+	}
+	if ply < len(s.pathHashes) {
+		s.pathHashes[ply] = hash // record this node so deeper nodes can detect a repetition back to it
+	}
 
 	// At the horizon, resolve outstanding captures with a quiescence search before evaluating, so the
 	// engine never judges a position mid-exchange (which is what made it hang pieces).
@@ -291,19 +348,18 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	// Probe the transposition table. A stored result searched at least as deep can cut this node off
 	// immediately; otherwise its best move still improves our move ordering.
 	var ttMove position.Move = position.NoMove
-	var hash uint64
 	if s.tt != nil {
-		hash = pos.ZobristHash()
 		if e, ok := s.tt.probe(hash); ok {
 			ttMove = e.move
 			if uint(e.depth) >= depth {
+				ttScore := scoreFromTT(e.score, ply)
 				switch {
 				case e.bound == boundExact:
-					return e.score
-				case e.bound == boundLower && e.score >= beta:
-					return e.score
-				case e.bound == boundUpper && e.score <= alpha:
-					return e.score
+					return ttScore
+				case e.bound == boundLower && ttScore >= beta:
+					return ttScore
+				case e.bound == boundUpper && ttScore <= alpha:
+					return ttScore
 				}
 			}
 		}
@@ -313,8 +369,6 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	bestMove := position.NoMove
 	legalCount := 0
 	cutoff := false
-
-	// TODO: doesn't yet understand draw by threefold repetition
 
 	var childPV pvList
 
@@ -398,15 +452,16 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		return 0 // stalemate; TODO: return a contempt value instead
 	}
 
-	// Store the result. Mate scores are ply-relative, so they are kept out of the ply-agnostic table.
-	if s.tt != nil && !isMateScore(bestScore) {
+	// Store the result. Mate scores are rewritten to be relative to this node (scoreToTT) so they remain
+	// correct when the position is transposed to at a different ply.
+	if s.tt != nil {
 		bound := boundExact
 		if bestScore <= alphaOrig {
 			bound = boundUpper
 		} else if bestScore >= beta {
 			bound = boundLower
 		}
-		s.tt.store(hash, depth, bestScore, bound, bestMove)
+		s.tt.store(hash, depth, scoreToTT(bestScore, ply), bound, bestMove)
 	}
 
 	return bestScore

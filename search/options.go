@@ -30,6 +30,11 @@ type SearchOptions struct {
 	// move applied, and the engine searches without a clock until it is told the move was actually
 	// played (ponderhit, which starts the clock) or that it was not (stop).
 	Ponder bool
+
+	// History holds the Zobrist hashes of the positions reached in the game before the one being
+	// searched, used for draw-by-repetition detection. It is engine-internal (not a UCI option) and is
+	// not emitted by AsUCI.
+	History []uint64
 }
 
 // NewDefaultOptions returns the default search options for an engine.

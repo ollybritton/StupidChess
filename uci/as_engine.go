@@ -19,6 +19,10 @@ type EngineSession struct {
 	engine    engines.Engine
 	positions []*position.Position
 	moves     []position.Move
+
+	// latestHistory holds the Zobrist hashes of every position before the latest one set by "position"
+	// (i.e. the game so far), so the search can detect draws by repetition.
+	latestHistory []uint64
 }
 
 func NewEngineSession(eng engines.Engine) *EngineSession {
@@ -175,7 +179,12 @@ func (s *EngineSession) handleCommandPosition(arguments []string) error {
 		return fmt.Errorf("invalid position command sent %q, can't parse FEN: %w", strings.Join(arguments, " "), err)
 	}
 
+	// Record the hash of each position the game passes through (every one except the final, which is the
+	// position to be searched) so the search can detect draws by repetition.
+	history := make([]uint64, 0, len(moves))
 	for _, move := range moves {
+		history = append(history, pos.ZobristHash())
+
 		parsed, err := position.ParseMove(move)
 		if err != nil {
 			return fmt.Errorf("invalid position command sent %q, can't understand move %q: %w", strings.Join(arguments, " "), move, err)
@@ -185,6 +194,7 @@ func (s *EngineSession) handleCommandPosition(arguments []string) error {
 	}
 
 	s.positions = append(s.positions, pos)
+	s.latestHistory = history
 
 	return nil
 }
@@ -329,6 +339,7 @@ func (s *EngineSession) handleCommandGo(arguments []string) error {
 	}
 
 	position := s.positions[length-1]
+	options.History = s.latestHistory
 	err := s.engine.Go(position, options)
 	if err != nil {
 		return fmt.Errorf("got an error searching for a move, %s", err)
