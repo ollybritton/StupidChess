@@ -5,4 +5,7 @@ type Searcher interface {
 	Responses() chan string
 	Root() error
 	Stop()
+	// PonderHit tells a ponder search that the move it was pondering on was actually played, so the
+	// clock should start now.
+	PonderHit()
 }

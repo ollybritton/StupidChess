@@ -30,11 +30,60 @@ type AlphaBetaSearch struct {
 	// atomically because the search runs on its own goroutine; the previous code used a plain bool on
 	// the shared options struct, which was a data race.
 	stop int32
+
+	// Time control is communicated to the search goroutine through atomics so the controller goroutine
+	// (which handles ponderhit/stop) never races on shared time.Time values.
+	//
+	// pondering is 1 during a "go ponder" search: there is no deadline until the pondered move is
+	// actually played (PonderHit), at which point the clock starts. hardDeadline/softDeadline are unix
+	// nanoseconds; 0 means "no deadline" (pondering or infinite analysis). The search stops at the hard
+	// deadline and refuses to start a new iteration past the soft deadline. plannedMoveTime is the move
+	// time computed at the start of the search, used to install the deadlines on a ponderhit.
+	pondering       int32
+	hardDeadline    int64
+	softDeadline    int64
+	plannedMoveTime int64
 }
 
 // stopped reports whether the search has been asked to abort.
 func (s *AlphaBetaSearch) stopped() bool {
 	return atomic.LoadInt32(&s.stop) == 1
+}
+
+// maxSearchDepth caps iterative deepening. It is far beyond what this engine reaches in practice; it
+// exists so a ponder/infinite search (which has no clock) cannot loop on the uint depth counter.
+const maxSearchDepth = 64
+
+func (s *AlphaBetaSearch) setDeadlines(start time.Time, moveTime time.Duration) {
+	atomic.StoreInt64(&s.hardDeadline, start.Add(moveTime).UnixNano())
+	// Don't begin an iteration we almost certainly can't finish: the next depth typically costs several
+	// times the last, and an interrupted depth is discarded entirely, so starting one past ~60% of the
+	// budget is wasted time.
+	atomic.StoreInt64(&s.softDeadline, start.Add(moveTime*3/5).UnixNano())
+}
+
+func (s *AlphaBetaSearch) clearDeadlines() {
+	atomic.StoreInt64(&s.hardDeadline, 0)
+	atomic.StoreInt64(&s.softDeadline, 0)
+}
+
+func (s *AlphaBetaSearch) hardTimeUp() bool {
+	d := atomic.LoadInt64(&s.hardDeadline)
+	return d != 0 && time.Now().UnixNano() >= d
+}
+
+func (s *AlphaBetaSearch) softTimeUp() bool {
+	d := atomic.LoadInt64(&s.softDeadline)
+	return d != 0 && time.Now().UnixNano() >= d
+}
+
+// PonderHit is called when the move the engine was pondering on is actually played: the opponent's
+// turn is over and our clock starts now, so we switch from open-ended pondering to a timed search.
+func (s *AlphaBetaSearch) PonderHit() {
+	if atomic.CompareAndSwapInt32(&s.pondering, 1, 0) {
+		moveTime := time.Duration(atomic.LoadInt64(&s.plannedMoveTime))
+		s.setDeadlines(time.Now(), moveTime)
+	}
 }
 
 func NewAlphaBetaSearch(requests chan Request, responses chan string, evalUs position.Evaluator, evalThem position.Evaluator) *AlphaBetaSearch {
@@ -87,7 +136,22 @@ func (s *AlphaBetaSearch) Root() error {
 		}
 
 		if s.options.MoveTime == 0 {
-			s.options.MoveTime = DefaultTimeManager(timeRemaining, increment)
+			s.options.MoveTime = DefaultTimeManager(timeRemaining, increment, s.options.MovesToGo)
+		}
+		atomic.StoreInt64(&s.plannedMoveTime, int64(s.options.MoveTime))
+
+		// Install the time controls. Pondering and infinite analysis run without a deadline (ended only
+		// by ponderhit or stop); a normal search gets soft/hard deadlines from the planned move time.
+		switch {
+		case s.options.Ponder:
+			atomic.StoreInt32(&s.pondering, 1)
+			s.clearDeadlines()
+		case s.options.Infinite:
+			atomic.StoreInt32(&s.pondering, 0)
+			s.clearDeadlines()
+		default:
+			atomic.StoreInt32(&s.pondering, 0)
+			s.setDeadlines(s.startTime, s.options.MoveTime)
 		}
 
 		s.responses <- fmt.Sprintf("info string searching for %s/%s (inc %s)", s.options.MoveTime, timeRemaining, increment)
@@ -95,6 +159,10 @@ func (s *AlphaBetaSearch) Root() error {
 		// Best move/PV from the last FULLY COMPLETED depth. A depth interrupted by the clock is
 		// discarded, so the engine never commits to a half-searched (and possibly blundering) move.
 		bestMove := position.NoMove
+		// bestLine is the principal variation of the last completed depth; its second move is what we
+		// expect the opponent to reply, and is reported as the ponder move.
+		var bestLine pvList
+		bestLine.new()
 
 		// Root moves: ordered by a quick static eval for the first iteration, then re-sorted by the
 		// real search scores on subsequent iterations (so the best move is searched first).
@@ -104,7 +172,7 @@ func (s *AlphaBetaSearch) Root() error {
 		}
 
 		// Iterative deepening.
-		for depth := uint(1); depth <= s.options.Depth; depth++ {
+		for depth := uint(1); depth <= s.options.Depth && depth <= maxSearchDepth; depth++ {
 			legalMoves.Sort()
 
 			bestScore := position.NoEval
@@ -157,6 +225,7 @@ func (s *AlphaBetaSearch) Root() error {
 				break
 			}
 			bestMove = depthBestMove
+			bestLine = append(bestLine[:0], pv...) // remember the completed PV for the ponder move
 
 			diff := time.Since(s.startTime)
 			if diff.Seconds() < 1 {
@@ -173,13 +242,30 @@ func (s *AlphaBetaSearch) Root() error {
 				)
 			}
 
-			// Stop if we are out of time for this move.
-			if time.Since(s.startTime) > s.options.MoveTime {
+			// Don't start a new iteration we are unlikely to finish (no effect while pondering / infinite,
+			// which have no deadline).
+			if s.softTimeUp() {
 				break
 			}
 		}
 
-		s.responses <- fmt.Sprintf("bestmove %s", bestMove.String())
+		// While pondering we must not return a move until the opponent has actually moved: wait for a
+		// ponderhit (which clears `pondering` and lets us fall through) or a stop. This only matters in
+		// the rare case the depth cap is reached before either arrives.
+		for atomic.LoadInt32(&s.pondering) == 1 && !s.stopped() {
+			time.Sleep(2 * time.Millisecond)
+		}
+
+		// Report the best move, plus the move we expect in reply so the controller can ponder on it.
+		ponderMove := position.NoMove
+		if len(bestLine) >= 2 {
+			ponderMove = bestLine[1]
+		}
+		if ponderMove != position.NoMove {
+			s.responses <- fmt.Sprintf("bestmove %s ponder %s", bestMove.String(), ponderMove.String())
+		} else {
+			s.responses <- fmt.Sprintf("bestmove %s", bestMove.String())
+		}
 	}
 
 	return nil
@@ -290,7 +376,7 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 				break // beta cutoff: the opponent won't allow this line
 			}
 
-			if time.Since(s.startTime) > s.options.MoveTime {
+			if s.hardTimeUp() {
 				atomic.StoreInt32(&s.stop, 1)
 			}
 			// Honour an explicit node limit (`go nodes N`); the default is math.MaxUint, so it never

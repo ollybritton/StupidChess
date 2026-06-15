@@ -77,9 +77,15 @@ func (e *EngineTryHard) NewGame() error {
 	return nil
 }
 
+// PonderHit forwards to the searcher: the pondered move was played, so the clock starts now.
+func (e *EngineTryHard) PonderHit() {
+	e.searcher.PonderHit()
+}
+
 func (e *EngineTryHard) Go(pos *position.Position, options search.SearchOptions) error {
-	// Play instantly from the opening book while still in known theory.
-	if e.useBook {
+	// Play instantly from the opening book while still in known theory. Skip it while pondering, since
+	// the whole point of pondering is to search on the opponent's clock.
+	if e.useBook && !options.Ponder {
 		if uci, ok := getBook().lookup(pos); ok {
 			if _, legal := bookLegalMove(pos, uci); legal {
 				fmt.Println("info string book move")

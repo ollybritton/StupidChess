@@ -49,37 +49,3 @@ func TestSoloistKeepsOnePiece(t *testing.T) {
 		require.True(t, pos.MakeMove(opp[0]))
 	}
 }
-
-// TestFortressEvalPrefersHuddle: with identical material, a compact position should score higher for
-// the fortress than a spread-out one.
-func TestFortressEvalPrefersHuddle(t *testing.T) {
-	// Both have K + two knights; in "huddle" they sit next to the king, in "spread" they're in the
-	// far corners.
-	huddle, err := position.NewPositionFromFEN("8/8/8/8/8/8/4k3/3NKN2 w - - 0 1")
-	require.NoError(t, err)
-	spread, err := position.NewPositionFromFEN("N6N/8/8/8/8/8/4k3/4K3 w - - 0 1")
-	require.NoError(t, err)
-
-	assert.Greater(t, fortressEval(huddle, position.White), fortressEval(spread, position.White),
-		"huddled pieces should evaluate better than scattered ones")
-}
-
-// TestFortressEvalKeepsMaterial: losing a piece must hurt the fortress far more than any positional
-// term, so it never throws material away to tidy its formation.
-func TestFortressEvalKeepsMaterial(t *testing.T) {
-	full, err := position.NewPositionFromFEN("8/8/8/8/8/8/4k3/3NKN2 w - - 0 1")
-	require.NoError(t, err)
-	downAKnight, err := position.NewPositionFromFEN("8/8/8/8/8/8/4k3/4KN2 w - - 0 1")
-	require.NoError(t, err)
-
-	assert.Greater(t, fortressEval(full, position.White), fortressEval(downAKnight, position.White),
-		"keeping a knight should beat any tidiness gained by losing it")
-}
-
-// TestPawnAdvancement sanity-checks the helper for both colours.
-func TestPawnAdvancement(t *testing.T) {
-	assert.Equal(t, 0, pawnAdvancement(position.White, 1)) // white pawn at home (rank 2)
-	assert.Equal(t, 2, pawnAdvancement(position.White, 3)) // white pawn pushed to rank 4
-	assert.Equal(t, 0, pawnAdvancement(position.Black, 6)) // black pawn at home (rank 7)
-	assert.Equal(t, 2, pawnAdvancement(position.Black, 4)) // black pawn pushed to rank 5
-}

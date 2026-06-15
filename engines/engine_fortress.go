@@ -1,100 +1,75 @@
 package engines
 
 import (
+	"fmt"
+
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
 )
 
-// fortressDepth is how many plies the fortress looks ahead. Depth 3 lets it see whether a move invites
-// a capture on the reply, so it can keep the position shut, while staying fast.
-const fortressDepth = 3
-
-// Fortress weights, all in (roughly) centipawn units so material dominates. Own material is valued
-// above enemy material so that even an equal trade is unwelcome: the fortress would rather keep all of
-// its pieces huddled than swap any of them off.
-const (
-	fortressOwnMaterial   = 12 // clinging to our own pieces (a piece is worth ~12x its centipawns to us)
-	fortressEnemyMaterial = 10 // capturing is fine, but worth less, so equal trades come out negative
-	fortressHuddle        = 2  // penalty per unit of squared distance from a piece to our own king
-	fortressPawnAdvance   = 8  // penalty per rank a pawn has crept forward (advancing opens the position)
-)
-
-// NewEngineFortress builds the ultra-defensive engine: it keeps everything bunched around its king,
-// leaves its pawns at home to keep the position closed, and refuses to let its pieces be traded.
-func NewEngineFortress() *SimpleEngine {
-	return NewSimpleEngine(
-		"fortress",
-		"Olly Britton",
-		"Hunkers down behind a wall of pawns: keeps every piece huddled around its king, leaves its pawns at home, and clings to its material so the position stays shut and nothing gets traded.",
-		func(pos *position.Position, _ search.SearchOptions) (position.Move, error) {
-			me := pos.SideToMove
-			move := bestPositionalMove(pos, fortressDepth, me, func(p *position.Position) int {
-				return fortressEval(p, me)
-			})
-			return move, nil
-		},
-	)
+// EngineFortress is the ultra-defensive engine. Unlike the other personality engines it plays real,
+// searching chess and is genuinely trying to win, but through a defensive lens: its evaluation
+// (EvalFortressUs) favours closed positions with its pawns and pieces kept back and huddled together,
+// so it grinds from behind a wall rather than charging out. The strength comes from the same
+// alpha-beta search, quiescence and transposition table as try-hard; only the evaluation differs.
+type EngineFortress struct {
+	noOptions
+	searcher search.Searcher
+	prepared bool
 }
 
-// fortressEval scores a position from the fortress's (me's) fixed point of view: higher is more
-// defensible. It rewards keeping material, keeping pieces close to the king, and keeping pawns home.
-func fortressEval(pos *position.Position, me position.Color) int {
-	enemy := me.Invert()
-	kingSquare := pos.KingLocation[me]
-	kingFile, kingRank := int(kingSquare%8), int(kingSquare/8)
+func NewEngineFortress() *EngineFortress {
+	requests := make(chan search.Request)
+	responses := make(chan string)
 
-	score := 0
-	for sq := 0; sq < 64; sq++ {
-		piece := pos.Squares[sq]
-		if piece == position.Empty {
-			continue
+	return &EngineFortress{
+		searcher: search.NewAlphaBetaSearch(
+			requests,
+			responses,
+			position.EvalFortressUs,
+			position.EvalFortressThem,
+		),
+	}
+}
+
+func (e *EngineFortress) Name() string   { return "fortress" }
+func (e *EngineFortress) Author() string { return "Olly Britton" }
+func (e *EngineFortress) Description() string {
+	return "Plays to win but hates open positions: a full alpha-beta search wrapped around a defensive evaluation that keeps its pawns and pieces back and huddled, grinding away from behind a closed wall."
+}
+
+func (e *EngineFortress) Prepare() error {
+	// Idempotent: start the response pump and search goroutine exactly once (see EngineTryHard.Prepare).
+	if e.prepared {
+		return nil
+	}
+	e.prepared = true
+
+	go func() {
+		for msg := range e.searcher.Responses() {
+			fmt.Println(msg)
 		}
+	}()
 
-		value := fortressPieceValue(piece.Colorless())
+	go e.searcher.Root()
 
-		switch piece.Color() {
-		case me:
-			score += fortressOwnMaterial * value
-
-			// Huddle: penalise distance from our own king, so the pieces cluster defensively.
-			df := sq%8 - kingFile
-			dr := sq/8 - kingRank
-			score -= fortressHuddle * (df*df + dr*dr)
-
-			// Closedness: penalise pawns that have advanced, since pushing pawns opens lines.
-			if piece.Colorless() == position.Pawn {
-				score -= fortressPawnAdvance * pawnAdvancement(me, sq/8)
-			}
-		case enemy:
-			score -= fortressEnemyMaterial * value
-		}
-	}
-
-	return score
+	return nil
 }
 
-// pawnAdvancement reports how many ranks a pawn on the given rank has advanced from its home rank.
-func pawnAdvancement(c position.Color, rank int) int {
-	if c == position.White {
-		return rank - 1 // white pawns start on rank 2 (index 1)
-	}
-	return 6 - rank // black pawns start on rank 7 (index 6)
+func (e *EngineFortress) NewGame() error {
+	return nil
 }
 
-// fortressPieceValue is a local centipawn table (the position package keeps its own table unexported).
-func fortressPieceValue(p position.Piece) int {
-	switch p {
-	case position.Pawn:
-		return 100
-	case position.Knight:
-		return 320
-	case position.Bishop:
-		return 330
-	case position.Rook:
-		return 500
-	case position.Queen:
-		return 900
-	default:
-		return 0
-	}
+// PonderHit forwards to the searcher: the pondered move was played, so the clock starts now.
+func (e *EngineFortress) PonderHit() {
+	e.searcher.PonderHit()
+}
+
+func (e *EngineFortress) Go(pos *position.Position, options search.SearchOptions) error {
+	e.searcher.Requests() <- search.NewRequest(pos, options)
+	return nil
+}
+
+func (e *EngineFortress) Stop() {
+	e.searcher.Stop()
 }

@@ -54,6 +54,8 @@ func (s *EngineSession) Handle(commandLine string) error {
 		handler = s.handleCommandGo
 	case "stop":
 		handler = s.handleCommandStop
+	case "ponderhit":
+		handler = s.handleCommandPonderHit
 	case "ucinewgame":
 		handler = s.handleCommandNewGame
 
@@ -311,9 +313,10 @@ func (s *EngineSession) handleCommandGo(arguments []string) error {
 
 			options.MoveTime = time.Millisecond * time.Duration(milliseconds)
 
-		case "ponder", "ponderhit":
-			// TODO: implement ponder command
-			return fmt.Errorf("ponder command currently not supported")
+		case "ponder":
+			// Search on the opponent's time: the position already includes the predicted move, and the
+			// engine searches without a clock until it receives `ponderhit` or `stop`.
+			options.Ponder = true
 		}
 
 		i++
@@ -337,6 +340,15 @@ func (s *EngineSession) handleCommandGo(arguments []string) error {
 func (s *EngineSession) handleCommandStop(arguments []string) error {
 	s.engine.Stop()
 
+	return nil
+}
+
+// handleCommandPonderHit tells a search-based engine that the move it was pondering on was played, so
+// it should start its clock. Engines that don't ponder (the simple personality engines) ignore it.
+func (s *EngineSession) handleCommandPonderHit(arguments []string) error {
+	if p, ok := s.engine.(interface{ PonderHit() }); ok {
+		p.PonderHit()
+	}
 	return nil
 }
 

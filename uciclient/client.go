@@ -29,16 +29,23 @@ import (
 // The reader runs on its own goroutine and never blocks: info lines are delivered on a buffered
 // channel (dropped if nobody is listening) and best moves on a small buffered channel, so a slow or
 // absent consumer can't wedge the engine.
+// SearchResult is what an engine returns from a search: its chosen move and, optionally, the move it
+// expects in reply (the "ponder" move from a `bestmove X ponder Y` line). Ponder is NoMove if absent.
+type SearchResult struct {
+	Best   position.Move
+	Ponder position.Move
+}
+
 type GUISession struct {
 	in  io.Writer
 	out io.Reader
 
 	command *exec.Cmd
 
-	moves chan position.Move
-	infos chan string
-	ready chan struct{}
-	errs  chan error
+	results chan SearchResult
+	infos   chan string
+	ready   chan struct{}
+	errs    chan error
 
 	closed int32
 
@@ -55,7 +62,7 @@ func newGUISession(in io.Writer, out io.Reader, command *exec.Cmd) *GUISession {
 		in:      in,
 		out:     out,
 		command: command,
-		moves:   make(chan position.Move, 1),
+		results: make(chan SearchResult, 1),
 		infos:   make(chan string, 256),
 		ready:   make(chan struct{}, 1),
 		errs:    make(chan error, 1),
@@ -176,8 +183,15 @@ func (s *GUISession) handleCommand(line string) {
 			}
 			return
 		}
+		result := SearchResult{Best: move, Ponder: position.NoMove}
+		// "bestmove e2e4 ponder e7e5": the move after the "ponder" keyword is the predicted reply.
+		if len(fields) >= 4 && fields[2] == "ponder" {
+			if ponder, err := position.ParseMove(fields[3]); err == nil {
+				result.Ponder = ponder
+			}
+		}
 		select {
-		case s.moves <- move:
+		case s.results <- result:
 		default:
 		}
 
@@ -227,35 +241,69 @@ func (s *GUISession) SetPosition(fen string, moves []string) error {
 	return s.sendCommand(cmd)
 }
 
-// Search sends "go" with the given options and returns the engine's best move. Every info line that
-// arrives while searching is passed to onInfo (which may be nil).
-func (s *GUISession) Search(options search.SearchOptions, onInfo func(line string)) (position.Move, error) {
-	// Drain any stale info left over from a previous search so it isn't attributed to this one.
+// drainStale clears any info or result left over from a previous search so it isn't attributed to this
+// one.
+func (s *GUISession) drainStale() {
 	for {
 		select {
 		case <-s.infos:
-			continue
+		case <-s.results:
 		default:
+			return
 		}
-		break
 	}
+}
 
-	if err := s.sendCommand("go " + options.AsUCI()); err != nil {
-		return position.NoMove, err
-	}
-
+// awaitResult blocks until the engine reports a best move (or errors), forwarding info lines to onInfo.
+func (s *GUISession) awaitResult(onInfo func(line string)) (SearchResult, error) {
 	for {
 		select {
 		case line := <-s.infos:
 			if onInfo != nil {
 				onInfo(line)
 			}
-		case move := <-s.moves:
-			return move, nil
+		case result := <-s.results:
+			return result, nil
 		case err := <-s.errs:
-			return position.NoMove, err
+			return SearchResult{Best: position.NoMove, Ponder: position.NoMove}, err
 		}
 	}
+}
+
+// Search sends "go" with the given options and returns the engine's best move. Every info line that
+// arrives while searching is passed to onInfo (which may be nil).
+func (s *GUISession) Search(options search.SearchOptions, onInfo func(line string)) (position.Move, error) {
+	result, err := s.SearchWithPonder(options, onInfo)
+	return result.Best, err
+}
+
+// SearchWithPonder is Search but also returns the engine's predicted reply (ponder move).
+func (s *GUISession) SearchWithPonder(options search.SearchOptions, onInfo func(line string)) (SearchResult, error) {
+	s.drainStale()
+	if err := s.sendCommand("go " + options.AsUCI()); err != nil {
+		return SearchResult{Best: position.NoMove, Ponder: position.NoMove}, err
+	}
+	return s.awaitResult(onInfo)
+}
+
+// StartPonder begins a ponder search ("go ponder ...") and returns immediately. The position must
+// already include the predicted opponent move. The engine will not report a move until PonderHit or
+// Stop; collect it later with AwaitResult.
+func (s *GUISession) StartPonder(options search.SearchOptions, onInfo func(line string)) error {
+	s.drainStale()
+	options.Ponder = true
+	return s.sendCommand("go " + options.AsUCI())
+}
+
+// PonderHit tells the engine the pondered move was actually played, so it should start its clock.
+func (s *GUISession) PonderHit() error {
+	return s.sendCommand("ponderhit")
+}
+
+// AwaitResult blocks for the result of a search already in progress (e.g. one started by StartPonder
+// and confirmed with PonderHit).
+func (s *GUISession) AwaitResult(onInfo func(line string)) (SearchResult, error) {
+	return s.awaitResult(onInfo)
 }
 
 // Stop asks the engine to stop searching and report a best move.

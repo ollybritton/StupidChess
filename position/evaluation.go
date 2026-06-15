@@ -17,6 +17,8 @@ var EvaluatorInfo = map[string]Evaluator{
 	"complex":       EvalComplex,
 	"pawnstar-us":   EvalPawnStarUs,
 	"pawnstar-them": EvalPawnStarThem,
+	"fortress-us":   EvalFortressUs,
+	"fortress-them": EvalFortressThem,
 }
 
 // GetEvaluator looks up an evaluator by name.

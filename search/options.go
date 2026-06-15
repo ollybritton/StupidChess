@@ -26,7 +26,10 @@ type SearchOptions struct {
 	BlackIncrement     time.Duration // Increment for black.
 	MovesToGo          uint          // Number of moves until the next time control.
 
-	// TODO: implement pondering
+	// Ponder means "search on the opponent's time": the position already has the predicted opponent
+	// move applied, and the engine searches without a clock until it is told the move was actually
+	// played (ponderhit, which starts the clock) or that it was not (stop).
+	Ponder bool
 }
 
 // NewDefaultOptions returns the default search options for an engine.
@@ -51,6 +54,10 @@ func NewDeafultOptions() SearchOptions {
 func (opt *SearchOptions) AsUCI() string {
 	var fields []string
 
+	if opt.Ponder {
+		fields = append(fields, "ponder")
+	}
+
 	if len(opt.SearchMoves) != 0 {
 		fields = append(fields, "searchmoves")
 
@@ -58,8 +65,6 @@ func (opt *SearchOptions) AsUCI() string {
 			fields = append(fields, move.String())
 		}
 	}
-
-	// TODO: implement ponder
 
 	if opt.WhiteTimeRemaining != 0 {
 		fields = append(fields, fmt.Sprintf("wtime %d", opt.WhiteTimeRemaining.Milliseconds()))
