@@ -49,26 +49,30 @@ func (s *SPRT) Upper() float64 { return s.upper }
 // variance v over n games, and target means mu0, mu1 for the two Elo
 // hypotheses, LLR = n*(mu1-mu0)/v * (mu - (mu0+mu1)/2).
 func (s *SPRT) LLR(w, d, l int) float64 {
-	n := w + d + l
-	if n == 0 {
+	if w+d+l == 0 {
 		return 0
 	}
-	fw, fd, fl := float64(w), float64(d), float64(l)
-	fn := float64(n)
-
-	mu := (fw + 0.5*fd) / fn
-	// Variance of the per-game score: E[x^2] - mu^2, with x in {0, 0.5, 1}.
-	variance := (fw+0.25*fd)/fn - mu*mu
-	// Guard the degenerate early case (all decisive one way, or all draws) so the
-	// ratio stays finite; the test simply continues until variance is meaningful.
-	if variance < 1e-9 {
-		variance = 1e-9
-	}
-
+	mu, variance, n := regularizedScore(w, d, l)
 	mu0 := eloToScore(s.Elo0)
 	mu1 := eloToScore(s.Elo1)
+	return n * (mu1 - mu0) / variance * (mu - (mu0+mu1)/2)
+}
+
+// regularizedScore returns the per-game mean, variance and effective sample size
+// with a mild +0.5 pseudo-count on each of win/draw/loss. The prior keeps the
+// variance strictly positive (so the GSPRT cannot divide by zero and explode on
+// an early all-wins streak) and damps the first few games, and it vanishes as
+// real games accumulate.
+func regularizedScore(w, d, l int) (mu, variance, n float64) {
+	fw, fd, fl := float64(w)+0.5, float64(d)+0.5, float64(l)+0.5
+	n = fw + fd + fl
+	mu = (fw + 0.5*fd) / n
+	variance = (fw+0.25*fd)/n - mu*mu // E[x^2] - mu^2 for x in {0, 0.5, 1}
+	if variance < 1e-6 {
+		variance = 1e-6
+	}
 	_ = fl
-	return fn * (mu1 - mu0) / variance * (mu - (mu0+mu1)/2)
+	return mu, variance, n
 }
 
 // Verdict is the outcome of a (possibly still-running) SPRT.
@@ -118,26 +122,15 @@ func eloToScore(elo float64) float64 {
 // interval. The estimate is the inverse logistic of the observed score; the
 // margin is propagated from the score's standard error through that mapping.
 func EloWithError(w, d, l int) (elo, margin float64) {
-	n := w + d + l
-	if n == 0 {
+	if w+d+l == 0 {
 		return 0, math.Inf(1)
 	}
-	fw, fd := float64(w), float64(d)
-	fn := float64(n)
-
-	mu := (fw + 0.5*fd) / fn
-	// Clamp away from 0 and 1 so the inverse logistic stays finite before enough
-	// decisive games have been seen.
-	const eps = 1e-4
-	mu = math.Max(eps, math.Min(1-eps, mu))
+	// Use the same +0.5-regularised score, so early estimates are finite and
+	// stable rather than swinging to +/-1600 Elo after one decisive game.
+	mu, variance, n := regularizedScore(w, d, l)
 
 	elo = -400 * math.Log10(1/mu-1)
-
-	variance := (fw+0.25*fd)/fn - mu*mu
-	if variance < 0 {
-		variance = 0
-	}
-	stdErr := math.Sqrt(variance / fn)
+	stdErr := math.Sqrt(variance / n)
 	// d(elo)/d(mu) = 400 / (ln(10) * mu * (1-mu)).
 	slope := 400 / (math.Ln10 * mu * (1 - mu))
 	margin = 1.96 * slope * stdErr

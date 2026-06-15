@@ -105,7 +105,11 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 	if cfg.SPRT != nil {
 		stats.Lower, stats.Upper = cfg.SPRT.Lower(), cfg.SPRT.Upper()
 	}
+	// minGames stops a lucky early streak from deciding before there is real
+	// evidence; the regularised LLR keeps it finite, this keeps it honest.
+	const minGames = 16
 	stopped := false
+	var final Stats // latched at the moment of decision, so in-flight games don't overwrite it
 
 	for res := range results {
 		switch {
@@ -126,14 +130,18 @@ func Run(ctx context.Context, cfg Config) (Stats, error) {
 		}
 
 		if !stopped {
-			decided := cfg.SPRT != nil && stats.Verdict != Continue
+			decided := cfg.SPRT != nil && stats.Verdict != Continue && stats.Games() >= minGames
 			if decided || (cfg.MaxGames > 0 && stats.Games() >= cfg.MaxGames) {
 				stopped = true
-				cancel() // stop the feeder; workers drain and exit, then results closes
+				final = stats   // report the result as it stood when we decided to stop
+				cancel()        // stop the feeder; workers drain and exit, then results closes
 			}
 		}
 	}
 
+	if stopped {
+		return final, nil
+	}
 	return stats, nil
 }
 
