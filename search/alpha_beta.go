@@ -58,6 +58,8 @@ type AlphaBetaSearch struct {
 	// makes alpha-beta (and the pruning below) actually pay off.
 	killers [maxPlies][2]position.Move
 	history [2][64][64]int32
+
+	rootDepth uint // the depth of the current iterative-deepening iteration (bounds extensions)
 }
 
 // drawScore is the value of a draw (by repetition or the fifty-move rule). Scoring it 0 means a winning
@@ -212,6 +214,7 @@ func (s *AlphaBetaSearch) Root() error {
 
 		// Iterative deepening.
 		for depth := uint(1); depth <= s.options.Depth && depth <= maxSearchDepth; depth++ {
+			s.rootDepth = depth
 			legalMoves.Sort()
 
 			bestScore := position.NoEval
@@ -396,6 +399,26 @@ func (s *AlphaBetaSearch) scoreMove(m, ttMove position.Move, ply int) int {
 	return h
 }
 
+// hasNonPawnMaterial reports whether the side has any piece beyond pawns and the king. Null-move
+// pruning is unsafe without it (pawn-and-king endgames are full of zugzwang, where passing would lose).
+func hasNonPawnMaterial(pos *position.Position, c position.Color) bool {
+	pieces := pos.Pieces[position.Knight] | pos.Pieces[position.Bishop] | pos.Pieces[position.Rook] | pos.Pieces[position.Queen]
+	return pos.Occupied[c]&pieces != 0
+}
+
+// lmrReduction is how many plies to shave off a late, quiet move's search. Later moves and deeper nodes
+// are reduced more; the move is re-searched at full depth if the reduced search unexpectedly beats alpha.
+func lmrReduction(depth uint, moveCount int) uint {
+	r := uint(1)
+	if depth >= 6 {
+		r++
+	}
+	if moveCount >= 10 {
+		r++
+	}
+	return r
+}
+
 // recordCutoff rewards a quiet move that caused a beta cutoff: it becomes a killer for this ply and its
 // history score grows with the depth (deeper cutoffs are more valuable).
 func (s *AlphaBetaSearch) recordCutoff(m position.Move, ply int, depth uint) {
@@ -408,6 +431,12 @@ func (s *AlphaBetaSearch) recordCutoff(m position.Move, ply int, depth uint) {
 
 func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, pv *pvList, pos *position.Position) int16 {
 	s.nodeCount++
+
+	// Safety valve: extensions can push ply past the nominal depth; never run off the end of the
+	// ply-indexed tables. Quiescence (capped separately) resolves and evaluates the position.
+	if ply >= maxPlies-1 {
+		return s.quiesce(alpha, beta, ply, pos)
+	}
 
 	hash := pos.ZobristHash()
 
@@ -451,6 +480,37 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		}
 	}
 
+	inCheck := pos.KingInCheck(pos.SideToMove)
+	isPV := beta-alpha > 1 // a full window means this is a principal-variation node
+
+	// Null-move pruning: if we can give the opponent a free move and still reach beta with a shallower
+	// search, the position is so good that the real moves will surely beat beta too, so we can prune.
+	// Skipped in check (passing is illegal) and without pieces (pawn endgames are full of zugzwang,
+	// where passing is actually best and this would prune a winning line).
+	if !isPV && !inCheck && depth >= 3 && hasNonPawnMaterial(pos, pos.SideToMove) && s.leafEval(pos) >= beta {
+		r := uint(2)
+		if depth >= 6 {
+			r = 3
+		}
+
+		savedEP := pos.EnPassant
+		pos.EnPassant = position.NoEnPassant
+		pos.SideToMove = pos.SideToMove.Invert()
+
+		var nullPV pvList
+		nullScore := -s.search(-beta, -beta+1, depth-1-r, ply+1, &nullPV, pos)
+
+		pos.SideToMove = pos.SideToMove.Invert()
+		pos.EnPassant = savedEP
+
+		if nullScore >= beta {
+			if nullScore >= mateScoreBound {
+				nullScore = beta // don't trust a mate claimed by the reduced null search
+			}
+			return nullScore
+		}
+	}
+
 	bestScore := position.NoEval
 	bestMove := position.NoMove
 	legalCount := 0
@@ -484,8 +544,41 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		}
 		legalCount++
 
+		// Check extension: a move that gives check usually starts something forcing, so search it a ply
+		// deeper. Bounded by 2x the root depth so a string of checks can't explode the tree.
+		givesCheck := pos.KingInCheck(pos.SideToMove)
+		extension := uint(0)
+		if givesCheck && ply < 2*int(s.rootDepth) {
+			extension = 1
+		}
+		newDepth := depth - 1 + extension
+
 		childPV.clear()
-		score := -s.search(-beta, -alpha, depth-1, ply+1, &childPV, pos)
+		var score int16
+		if legalCount == 1 {
+			// First (best-ordered) move: search it with the full window to establish the PV.
+			score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos)
+		} else {
+			// Late move reductions: search a late, quiet, non-checking move shallower first, on a null
+			// window. If it beats alpha we re-search at full depth.
+			reduction := uint(0)
+			if extension == 0 && depth >= 3 && legalCount >= 4 && isQuiet(move) && !inCheck && !givesCheck {
+				reduction = lmrReduction(depth, legalCount)
+				if reduction > newDepth-1 {
+					reduction = newDepth - 1
+				}
+			}
+
+			// Null-window scout (Principal Variation Search): we only expect to confirm this move is not
+			// better than the PV move, which a zero-width window decides faster.
+			score = -s.search(-alpha-1, -alpha, newDepth-reduction, ply+1, &childPV, pos)
+			if reduction > 0 && score > alpha {
+				score = -s.search(-alpha-1, -alpha, newDepth, ply+1, &childPV, pos) // reduced search surprised us
+			}
+			if score > alpha && score < beta {
+				score = -s.search(-beta, -alpha, newDepth, ply+1, &childPV, pos) // a real new PV: full window
+			}
+		}
 		pos.UndoMove(move)
 
 		if score > bestScore {
