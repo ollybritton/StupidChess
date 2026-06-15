@@ -35,8 +35,12 @@ The bot then:
 
 - accepts standard-chess challenges (and declines variants it can't play),
 - plays every game it's in, one engine subprocess per game (so it can play several at once),
-- passes each game's clock through to the engine, so time-managing engines (tryhard) pace themselves
-  while the instant personality engines just move.
+- passes each game's clock through to the engine, so time-managing engines (tryhard, fortress) pace
+  themselves while the instant personality engines just move,
+- **ponders on the opponent's clock**: after moving, a searching engine predicts the reply and keeps
+  thinking about it; if the opponent plays it, that thinking is reused (a "ponder hit"), otherwise it
+  is discarded and the real position is searched. Engines that don't search (soloist, sprinter, …)
+  simply don't offer a prediction, so they never ponder.
 
 Challenge the bot by visiting its Lichess profile and clicking **Challenge to a game**, or send it an
 open challenge. Stop the bot with ctrl-c.

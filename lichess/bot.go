@@ -139,6 +139,7 @@ func (b *Bot) playGame(ctx context.Context, gameID string) {
 		myColor    position.Color
 		initialFEN = position.StartingPosition
 		greeted    bool
+		ponder     = &ponderState{}
 	)
 
 	err = streamNDJSON(body, func(line []byte) error {
@@ -163,14 +164,14 @@ func (b *Bot) playGame(ctx context.Context, gameID string) {
 					b.Logf("game %s: could not send greeting: %v", gameID, err)
 				}
 			}
-			return b.onState(ctx, gameID, mover, initialFEN, myColor, gf.State)
+			return b.onState(ctx, gameID, mover, initialFEN, myColor, gf.State, ponder)
 
 		case "gameState":
 			var st GameState
 			if err := json.Unmarshal(line, &st); err != nil {
 				return nil
 			}
-			return b.onState(ctx, gameID, mover, initialFEN, myColor, st)
+			return b.onState(ctx, gameID, mover, initialFEN, myColor, st, ponder)
 		}
 		return nil
 	})
@@ -181,9 +182,15 @@ func (b *Bot) playGame(ctx context.Context, gameID string) {
 	b.Logf("game %s: finished", gameID)
 }
 
+// ponderState tracks an in-progress "think on the opponent's clock" search for one game.
+type ponderState struct {
+	active bool   // a ponder search is running
+	move   string // the opponent reply we predicted and are pondering on
+}
+
 // onState reacts to a game snapshot: if the game is over it stops; if it is our turn it computes and
-// plays a move.
-func (b *Bot) onState(ctx context.Context, gameID string, mover Mover, initialFEN string, myColor position.Color, st GameState) error {
+// plays a move (reusing any pondering) and then starts pondering the expected continuation.
+func (b *Bot) onState(ctx context.Context, gameID string, mover Mover, initialFEN string, myColor position.Color, st GameState, ps *ponderState) error {
 	if st.Status != "" && st.Status != "started" {
 		b.Logf("game %s: over (%s)", gameID, st.Status)
 		return errGameOver
@@ -191,24 +198,62 @@ func (b *Bot) onState(ctx context.Context, gameID string, mover Mover, initialFE
 
 	moves := splitMoves(st.Moves)
 	if sideToMove(initialFEN, len(moves)) != myColor {
-		return nil // not our turn
+		return nil // opponent's turn: keep pondering (if we are) and wait
 	}
 
-	uci, err := mover.Move(initialFEN, moves, clockOptions(st))
+	opts := clockOptions(st)
+	best, ponder, err := b.think(mover, initialFEN, moves, opts, ps)
 	if err != nil {
 		b.Logf("game %s: engine error: %v", gameID, err)
 		return nil
 	}
-	if uci == "" || uci == "0000" {
+	if best == "" || best == "0000" {
 		return nil // no move (game already decided)
 	}
 
-	if err := b.client.MakeMove(ctx, gameID, uci); err != nil {
-		b.Logf("game %s: could not play %s: %v", gameID, uci, err)
+	if err := b.client.MakeMove(ctx, gameID, best); err != nil {
+		b.Logf("game %s: could not play %s: %v", gameID, best, err)
 		return nil
 	}
-	b.Logf("game %s: played %s", gameID, uci)
+	b.Logf("game %s: played %s", gameID, best)
+
+	b.startPonder(mover, initialFEN, moves, best, ponder, opts, ps)
 	return nil
+}
+
+// think produces our move. If we were pondering and the opponent played exactly the move we predicted,
+// the ponder search is already a search of the real position, so a ponderhit hands us its result for
+// free; otherwise we abandon it and search the actual position.
+func (b *Bot) think(mover Mover, initialFEN string, moves []string, opts search.SearchOptions, ps *ponderState) (best, ponder string, err error) {
+	if ps.active {
+		ps.active = false
+
+		lastMove := ""
+		if len(moves) > 0 {
+			lastMove = moves[len(moves)-1]
+		}
+		if ps.move != "" && lastMove == ps.move {
+			return mover.PonderHit()
+		}
+		_ = mover.StopPonder()
+	}
+	return mover.MoveWithPonder(initialFEN, moves, opts)
+}
+
+// startPonder begins thinking about the position after our move and the reply we expect, so that a
+// correct prediction turns into a head start. It is a no-op when the engine offered no prediction.
+func (b *Bot) startPonder(mover Mover, initialFEN string, moves []string, best, ponder string, opts search.SearchOptions, ps *ponderState) {
+	ps.active = false
+	if ponder == "" {
+		return
+	}
+
+	predicted := append(append([]string{}, moves...), best, ponder)
+	if err := mover.StartPonder(initialFEN, predicted, opts); err != nil {
+		return
+	}
+	ps.active = true
+	ps.move = ponder
 }
 
 // colorIn reports which colour we are playing in a game.

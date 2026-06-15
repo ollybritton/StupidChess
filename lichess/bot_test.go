@@ -47,17 +47,39 @@ func TestResolveFEN(t *testing.T) {
 	assert.Equal(t, custom, resolveFEN(custom))
 }
 
-// stubMover is a Mover that always returns the same move and records how it was called.
+// stubMover is a Mover that returns canned moves and records how it was called.
 type stubMover struct {
-	move       string
-	lastFEN    string
-	lastMoves  []string
-	closeCalls int
+	move            string // returned by MoveWithPonder
+	ponder          string // ponder move returned by MoveWithPonder
+	ponderHitResult string // move returned by PonderHit
+
+	lastFEN   string
+	lastMoves []string
+
+	startPonderCalls int
+	ponderHitCalls   int
+	stopPonderCalls  int
+	closeCalls       int
 }
 
-func (m *stubMover) Move(fen string, moves []string, _ search.SearchOptions) (string, error) {
+func (m *stubMover) MoveWithPonder(fen string, moves []string, _ search.SearchOptions) (string, string, error) {
 	m.lastFEN, m.lastMoves = fen, moves
-	return m.move, nil
+	return m.move, m.ponder, nil
+}
+
+func (m *stubMover) StartPonder(_ string, _ []string, _ search.SearchOptions) error {
+	m.startPonderCalls++
+	return nil
+}
+
+func (m *stubMover) PonderHit() (string, string, error) {
+	m.ponderHitCalls++
+	return m.ponderHitResult, "", nil
+}
+
+func (m *stubMover) StopPonder() error {
+	m.stopPonderCalls++
+	return nil
 }
 
 func (m *stubMover) Close() error {
@@ -170,4 +192,50 @@ func TestBotWaitsWhenNotOurTurn(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		// good: no move was played
 	}
+}
+
+// TestThinkUsesPonderHit: when the opponent plays exactly the move we predicted, we should convert the
+// in-progress ponder into our move (a ponderhit) instead of searching afresh.
+func TestThinkUsesPonderHit(t *testing.T) {
+	b := NewBot(nil, nil)
+	mover := &stubMover{move: "g1f3", ponderHitResult: "d2d4"}
+	ps := &ponderState{active: true, move: "e7e5"} // we predicted 1...e5
+
+	best, _, err := b.think(mover, position.StartingPosition, []string{"e2e4", "e7e5"}, search.NewDeafultOptions(), ps)
+	require.NoError(t, err)
+	assert.Equal(t, "d2d4", best, "should return the ponder-hit result")
+	assert.Equal(t, 1, mover.ponderHitCalls)
+	assert.Equal(t, 0, mover.stopPonderCalls)
+	assert.False(t, ps.active)
+}
+
+// TestThinkStopsPonderOnMisprediction: when the opponent deviates, we abandon the ponder and search
+// the actual position.
+func TestThinkStopsPonderOnMisprediction(t *testing.T) {
+	b := NewBot(nil, nil)
+	mover := &stubMover{move: "g1f3"}
+	ps := &ponderState{active: true, move: "e7e5"} // we predicted 1...e5, but:
+
+	best, _, err := b.think(mover, position.StartingPosition, []string{"e2e4", "c7c5"}, search.NewDeafultOptions(), ps)
+	require.NoError(t, err)
+	assert.Equal(t, "g1f3", best, "should fall back to a fresh search")
+	assert.Equal(t, 1, mover.stopPonderCalls)
+	assert.Equal(t, 0, mover.ponderHitCalls)
+	assert.Equal(t, []string{"e2e4", "c7c5"}, mover.lastMoves)
+}
+
+// TestStartPonder: a search that offers a predicted reply starts pondering; one that offers none does not.
+func TestStartPonder(t *testing.T) {
+	b := NewBot(nil, nil)
+
+	mover := &stubMover{}
+	ps := &ponderState{}
+	b.startPonder(mover, position.StartingPosition, []string{"e2e4", "e7e5"}, "g1f3", "b8c6", search.NewDeafultOptions(), ps)
+	assert.True(t, ps.active)
+	assert.Equal(t, "b8c6", ps.move)
+	assert.Equal(t, 1, mover.startPonderCalls)
+
+	ps2 := &ponderState{}
+	b.startPonder(mover, position.StartingPosition, nil, "e2e4", "", search.NewDeafultOptions(), ps2)
+	assert.False(t, ps2.active, "no prediction means no pondering")
 }
