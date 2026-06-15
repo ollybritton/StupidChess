@@ -92,9 +92,13 @@ func TestTryHardOwnBookOption(t *testing.T) {
 	e := NewEngineTryHard()
 	assert.True(t, e.useBook, "the opening book should be on by default")
 
-	opts := e.Options()
-	assert.Len(t, opts, 1)
-	assert.Equal(t, "OwnBook", opts[0].Name)
+	// try-hard exposes the base engine's Threads option plus its own OwnBook.
+	names := map[string]bool{}
+	for _, opt := range e.Options() {
+		names[opt.Name] = true
+	}
+	assert.True(t, names["OwnBook"], "OwnBook option should be present")
+	assert.True(t, names["Threads"], "inherited Threads option should be present")
 
 	assert.NoError(t, e.SetOption("OwnBook", "false"))
 	assert.False(t, e.useBook)
