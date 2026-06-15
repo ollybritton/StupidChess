@@ -716,11 +716,15 @@ func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Posi
 	legalCount := 0
 
 	for _, move := range moves.AsSlice() {
-		// Delta pruning: when not in check, skip a capture that, even if it won the captured piece for
-		// free plus a margin, still couldn't reach alpha. (Promotions are exempt: they win more than the
-		// captured piece.)
 		if !inCheck && move.Promotion() == position.None {
+			// Delta pruning: skip a capture that, even if it won the captured piece for free plus a
+			// margin, still couldn't reach alpha. (Promotions are exempt: they win more.)
 			if int(bestScore)+pieceOrderValue[move.Captured().Colorless()]+deltaMargin < int(alpha) {
+				continue
+			}
+			// SEE pruning: skip a capture that loses material once the recaptures are played out. These
+			// are noise in quiescence; the static exchange answers it without searching.
+			if pos.SEE(move) < 0 {
 				continue
 			}
 		}
