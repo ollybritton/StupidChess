@@ -39,14 +39,29 @@ func EvalComplex(pos *Position) int16 {
 		phase += phaseWeight[piece]
 	}
 
-	// Blend the king's middlegame and endgame placement by the remaining material (the "phase").
 	if phase > maxPhase {
 		phase = maxPhase // promotions can push it past the starting total
 	}
-	score += (kingMG*int32(phase) + kingEG*int32(maxPhase-phase)) / int32(maxPhase)
 
-	return int16(score)
+	// Positional terms (mobility, pawn structure, king safety, ...) each carry their own middlegame and
+	// endgame value; material and the non-king tables are phase-independent and so contribute to both.
+	posMG, posEG := evalPositional(pos)
+	mg := score + kingMG + int32(posMG)
+	eg := score + kingEG + int32(posEG)
+
+	final := (mg*int32(phase) + eg*int32(maxPhase-phase)) / int32(maxPhase)
+
+	// Keep clear of the mate-score band so a huge material imbalance is never misread as a forced mate.
+	if final > evalLimit {
+		final = evalLimit
+	} else if final < -evalLimit {
+		final = -evalLimit
+	}
+	return int16(final)
 }
+
+// evalLimit bounds the static evaluation well below the mate-score band.
+const evalLimit = 20000
 
 // gamePhase weights and their starting total. The king and pawns contribute nothing (absent from the
 // map yields 0), so a full board of minor pieces, rooks and queens sums to maxPhase.
