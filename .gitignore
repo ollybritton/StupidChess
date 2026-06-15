@@ -100,3 +100,6 @@ profiles/
 /stupidchess
 .vscode/*
 .vscode/settings.json
+
+# Lichess bot token (secret, never commit)
+token.txt

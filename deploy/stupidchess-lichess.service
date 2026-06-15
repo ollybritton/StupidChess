@@ -1,0 +1,29 @@
+# systemd unit for the StupidChess Lichess bot. Install to
+# /etc/systemd/system/stupidchess-lichess.service, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now stupidchess-lichess
+#
+# The API token is NOT stored here. Put it in an environment file readable only by the service user:
+#   mkdir -p ~/.config/stupidchess && chmod 700 ~/.config/stupidchess
+#   printf 'LICHESS_TOKEN=lip_xxx\n' > ~/.config/stupidchess/lichess.env && chmod 600 ~/.config/stupidchess/lichess.env
+#
+# Change the engine by editing -e <engine> below (then daemon-reload + restart).
+
+[Unit]
+Description=StupidChess Lichess bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=olly
+Group=olly
+EnvironmentFile=/home/olly/.config/stupidchess/lichess.env
+ExecStart=/home/olly/bin/stupidchess lichess play -e tryhard
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
