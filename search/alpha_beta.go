@@ -73,6 +73,17 @@ const maxPlies = 128
 // per-node ordering scratch array on the stack.
 const maxMoves = 256
 
+// Pruning margins, in centipawns. These trade a small amount of accuracy for a large reduction in nodes
+// near the leaves. Conservative values so tactics still surface.
+const (
+	rfpMaxDepth      = 6   // reverse futility pruning only at shallow depth
+	rfpMargin        = 80  // per ply of depth
+	futilityMaxDepth = 6   // futility pruning of quiet moves only at shallow depth
+	futilityMargin   = 100 // per ply of depth
+	lmpMaxDepth      = 6   // late move pruning only at shallow depth
+	deltaMargin      = 200 // quiescence delta pruning safety margin
+)
+
 // stopped reports whether the search has been asked to abort.
 func (s *AlphaBetaSearch) stopped() bool {
 	return atomic.LoadInt32(&s.stop) == 1
@@ -483,11 +494,26 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 	inCheck := pos.KingInCheck(pos.SideToMove)
 	isPV := beta-alpha > 1 // a full window means this is a principal-variation node
 
+	// Static evaluation of this node, used by the pruning heuristics below (meaningless in check, where
+	// the side to move may be losing material it is forced to address).
+	staticEval := position.NoEval
+	if !inCheck {
+		staticEval = s.leafEval(pos)
+	}
+
+	// Reverse futility pruning (a.k.a. static null move): if our static eval is so far above beta that
+	// even handing back a depth-scaled margin keeps us above beta, assume the search would confirm it
+	// and prune. Only at shallow non-PV nodes, never near a mate.
+	if !isPV && !inCheck && depth <= rfpMaxDepth && beta < mateScoreBound &&
+		int(staticEval)-rfpMargin*int(depth) >= int(beta) {
+		return staticEval
+	}
+
 	// Null-move pruning: if we can give the opponent a free move and still reach beta with a shallower
 	// search, the position is so good that the real moves will surely beat beta too, so we can prune.
 	// Skipped in check (passing is illegal) and without pieces (pawn endgames are full of zugzwang,
 	// where passing is actually best and this would prune a winning line).
-	if !isPV && !inCheck && depth >= 3 && hasNonPawnMaterial(pos, pos.SideToMove) && s.leafEval(pos) >= beta {
+	if !isPV && !inCheck && depth >= 3 && hasNonPawnMaterial(pos, pos.SideToMove) && staticEval >= beta {
 		r := uint(2)
 		if depth >= 6 {
 			r = 3
@@ -552,6 +578,22 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 			extension = 1
 		}
 		newDepth := depth - 1 + extension
+
+		// Prune late, quiet, non-checking moves at shallow non-PV nodes (we keep the first move so there
+		// is always a result):
+		//   - late move pruning: once enough moves have been tried, skip the rest entirely.
+		//   - futility pruning: if the static eval plus a depth-scaled margin still can't reach alpha, a
+		//     quiet move is very unlikely to, so skip it.
+		if !isPV && !inCheck && extension == 0 && legalCount > 1 && isQuiet(move) && !givesCheck {
+			if depth <= lmpMaxDepth && legalCount > 3+int(depth*depth) {
+				pos.UndoMove(move)
+				continue
+			}
+			if depth <= futilityMaxDepth && int(staticEval)+futilityMargin*int(depth) <= int(alpha) {
+				pos.UndoMove(move)
+				continue
+			}
+		}
 
 		childPV.clear()
 		var score int16
@@ -674,6 +716,15 @@ func (s *AlphaBetaSearch) quiesce(alpha, beta int16, ply int, pos *position.Posi
 	legalCount := 0
 
 	for _, move := range moves.AsSlice() {
+		// Delta pruning: when not in check, skip a capture that, even if it won the captured piece for
+		// free plus a margin, still couldn't reach alpha. (Promotions are exempt: they win more than the
+		// captured piece.)
+		if !inCheck && move.Promotion() == position.None {
+			if int(bestScore)+pieceOrderValue[move.Captured().Colorless()]+deltaMargin < int(alpha) {
+				continue
+			}
+		}
+
 		if !pos.MakeMove(move) {
 			continue
 		}
