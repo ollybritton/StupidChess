@@ -2,6 +2,8 @@ package engines
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/ollybritton/StupidChess/position"
 	"github.com/ollybritton/StupidChess/search"
@@ -26,7 +28,6 @@ import (
 // pursue its own goal while assuming the opponent plays ordinary chess; pass the same evaluator twice
 // for a symmetric engine.
 type searchEngine struct {
-	noOptions
 	name        string
 	author      string
 	description string
@@ -51,6 +52,21 @@ func (e *searchEngine) Author() string      { return e.author }
 func (e *searchEngine) Description() string { return e.description }
 func (e *searchEngine) NewGame() error      { return nil }
 func (e *searchEngine) Stop()               { e.searcher.Stop() }
+
+// Options exposes the standard UCI "Threads" option (Lazy SMP). Engines that add their own options
+// (e.g. try-hard's OwnBook) should append to these.
+func (e *searchEngine) Options() []EngineOption {
+	return []EngineOption{{Name: "Threads", Type: "spin", Default: "1"}}
+}
+
+func (e *searchEngine) SetOption(name, value string) error {
+	if strings.EqualFold(name, "Threads") {
+		if n, err := strconv.Atoi(value); err == nil {
+			e.searcher.SetThreads(n)
+		}
+	}
+	return nil
+}
 
 // PonderHit forwards to the searcher: the pondered move was played, so the clock starts now.
 func (e *searchEngine) PonderHit() { e.searcher.PonderHit() }

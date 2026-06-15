@@ -108,6 +108,13 @@ func (m *EngineMover) StopPonder() error {
 	return err
 }
 
+// SetOption sets a UCI option on the engine (e.g. "Threads"). Call it before the first move.
+func (m *EngineMover) SetOption(name, value string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.session.SetOption(name, value)
+}
+
 // Close shuts the engine subprocess down.
 func (m *EngineMover) Close() error {
 	return m.session.Close()

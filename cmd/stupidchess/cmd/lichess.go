@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/ollybritton/StupidChess/engines"
@@ -54,9 +55,18 @@ var lichessPlayCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
+		threads, _ := cmd.Flags().GetInt("threads")
+
 		client := lichess.NewClient(token)
 		bot := lichess.NewBot(client, func(gameID string) (lichess.Mover, error) {
-			return lichess.NewEngineMover(exe, []string{"uci", "-e", name})
+			m, err := lichess.NewEngineMover(exe, []string{"uci", "-e", name})
+			if err != nil {
+				return nil, err
+			}
+			if threads > 1 {
+				_ = m.SetOption("Threads", strconv.Itoa(threads)) // Lazy SMP
+			}
+			return m, nil
 		})
 		bot.Logf = func(format string, a ...interface{}) { fmt.Printf(format+"\n", a...) }
 		if greeting, _ := cmd.Flags().GetString("greeting"); greeting != "" {
@@ -128,6 +138,7 @@ func init() {
 	lichessPlayCmd.Flags().Int("clock", 180, "initial clock in seconds for challenges sent (with --seek)")
 	lichessPlayCmd.Flags().Int("increment", 2, "clock increment in seconds for challenges sent (with --seek)")
 	lichessPlayCmd.Flags().Bool("rated", false, "send rated challenges (with --seek)")
+	lichessPlayCmd.Flags().Int("threads", 1, "search threads per game (Lazy SMP)")
 
 	lichessCmd.AddCommand(lichessPlayCmd)
 	lichessCmd.AddCommand(lichessUpgradeCmd)

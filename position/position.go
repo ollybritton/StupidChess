@@ -529,6 +529,15 @@ func (p *Position) KingInCheck(side Color) bool {
 	return p.IsAttacked(p.KingLocation[side], side.Invert())
 }
 
+// Clone returns an independent deep copy of the position, safe to make/unmake moves on from another
+// goroutine (the parallel search gives each thread its own board). The fixed-size arrays are copied by
+// the struct assignment; only the halfmove-clock history slice needs a separate copy.
+func (p *Position) Clone() *Position {
+	clone := *p
+	clone.halfmoveClockHistory = append([]uint(nil), p.halfmoveClockHistory...)
+	return &clone
+}
+
 // HasEnPassant returns true if the current player has a valid en passant move.
 func (p *Position) HasEnPassant() bool {
 	return p.EnPassant != NoEnPassant

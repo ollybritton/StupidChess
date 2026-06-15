@@ -19,7 +19,8 @@ User=olly
 Group=olly
 EnvironmentFile=/home/olly/.config/stupidchess/lichess.env
 # --seek makes it challenge online bots whenever it is idle, so it is almost always playing.
-ExecStart=/home/olly/bin/stupidchess lichess play -e tryhard --seek --max-games 2
+# --threads 3: with --max-games 2 that is up to 6 search threads, matching the 6-core host.
+ExecStart=/home/olly/bin/stupidchess lichess play -e tryhard --seek --max-games 2 --threads 3
 Restart=on-failure
 RestartSec=5
 

@@ -42,9 +42,9 @@ func TestMateScoreIsCached(t *testing.T) {
 	score := s.search(position.MinEval, position.MaxEval, 3, 0, &pv, pos)
 	require.Greater(t, score, mateScoreBound, "should have found the mate")
 
-	e, ok := s.tt.probe(pos.ZobristHash())
+	_, ttScore, _, _, ok := s.tt.probe(pos.ZobristHash())
 	require.True(t, ok, "the mate position must now be cached")
-	assert.Greater(t, scoreFromTT(e.score, 0), mateScoreBound, "the cached score must still be a mate")
+	assert.Greater(t, scoreFromTT(ttScore, 0), mateScoreBound, "the cached score must still be a mate")
 }
 
 // TestIsRepetitionScanAndWindow checks the repetition scan over the search path and the game history,

@@ -27,17 +27,17 @@ func NewEngineTryHard() *EngineTryHard {
 	}
 }
 
-// Options exposes the opening-book toggle as the standard UCI "OwnBook" option (overriding the
-// no-options default from the embedded base).
+// Options exposes the opening-book toggle on top of the base engine's options (Threads).
 func (e *EngineTryHard) Options() []EngineOption {
-	return []EngineOption{{Name: "OwnBook", Type: "check", Default: "true"}}
+	return append(e.searchEngine.Options(), EngineOption{Name: "OwnBook", Type: "check", Default: "true"})
 }
 
 func (e *EngineTryHard) SetOption(name, value string) error {
 	if strings.EqualFold(name, "OwnBook") {
 		e.useBook = strings.EqualFold(value, "true")
+		return nil
 	}
-	return nil
+	return e.searchEngine.SetOption(name, value) // Threads, etc.
 }
 
 func (e *EngineTryHard) Go(pos *position.Position, options search.SearchOptions) error {
