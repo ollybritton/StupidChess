@@ -8,23 +8,20 @@ type TimeManager func(timeRemaining, increment time.Duration, movesToGo uint) ti
 
 var DefaultTimeManager = defaultTimeManager
 
-// moveOverhead is held back on every move to cover the time it takes to transmit the move and any
-// scheduling jitter, so the engine doesn't flag by overshooting its own deadline.
-const moveOverhead = 60 * time.Millisecond
+// moveOverhead is held back from EVERY move's budget to cover the time it takes to transmit the move to
+// Lichess (read the stream event, run the search, POST the move) plus scheduling jitter, so the engine
+// does not flag by overshooting its real deadline. It is paid once per move, so it must be reserved per
+// move - an earlier version subtracted it once from the whole clock, reserving ~2ms per move, which let
+// the bot overspend a little on every move and lose on time in long or fast games.
+const moveOverhead = 150 * time.Millisecond
 
 // defaultTimeManager allocates time for one move. It spends an even share of the clock plus most of the
-// increment, keeps a safety reserve, and never gambles too much of the remaining time on a single move
-// so it survives time scrambles. Compared with the old "remaining/40" rule this is increment-aware and
-// uses the moves-to-go hint, which lets the engine search deeper when it can afford to.
+// increment, reserves the move overhead, and never gambles too much of the remaining time on a single
+// move so it survives time scrambles. It is increment-aware and uses the moves-to-go hint, which lets
+// the engine search deeper when it can afford to.
 func defaultTimeManager(timeRemaining, increment time.Duration, movesToGo uint) time.Duration {
-	if timeRemaining <= 0 {
-		return 50 * time.Millisecond // emergency: move almost immediately
-	}
-
-	// Keep a little in reserve so we never spend the clock down to zero.
-	available := timeRemaining - moveOverhead
-	if available < timeRemaining/2 {
-		available = timeRemaining / 2
+	if timeRemaining <= moveOverhead {
+		return 10 * time.Millisecond // emergency: barely any clock left, move almost immediately
 	}
 
 	// If the moves-to-go is unknown (or implausibly large), assume a typical middlegame horizon.
@@ -33,12 +30,12 @@ func defaultTimeManager(timeRemaining, increment time.Duration, movesToGo uint) 
 		moves = 30
 	}
 
-	// An even slice of the remaining time, plus most of the increment (it is replenished each move, so
-	// it can be spent freely).
-	target := available/time.Duration(moves) + increment*3/4
+	// An even slice of the remaining time, plus most of the increment (replenished each move, so it can be
+	// spent freely), minus the per-move overhead we must hold back.
+	target := timeRemaining/time.Duration(moves) + increment*3/4 - moveOverhead
 
 	// Never spend more than a quarter of what's left on one move.
-	if limit := available / 4; target > limit {
+	if limit := timeRemaining / 4; target > limit {
 		target = limit
 	}
 	if target < 10*time.Millisecond {
