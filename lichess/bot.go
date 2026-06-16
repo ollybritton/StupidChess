@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"math/rand"
 	"strings"
 	"sync"
@@ -23,6 +24,12 @@ const (
 	matchmakeInterval = 10 * time.Second
 	challengeCooldown = 25 * time.Second
 )
+
+// staleGameTimeout is how long a game may go with no move by either side before the bot abandons it.
+// It is generous enough never to fire during a legitimately slow move in the fast time controls the bot
+// plays, but it rescues the bot from a game whose opponent has vanished: such a game otherwise occupies
+// a game slot forever and, once MaxGames is reached, stops the bot from seeking any new games.
+const staleGameTimeout = 4 * time.Minute
 
 // errGameOver is a sentinel used to stop reading a game stream once the game has finished.
 var errGameOver = errors.New("game over")
@@ -248,6 +255,15 @@ func (b *Bot) playGame(ctx context.Context, gameID string) {
 	}
 	defer body.Close()
 
+	// Stall watchdog: abandon the game if neither side moves for staleGameTimeout, so a vanished opponent
+	// cannot wedge the bot forever. lastActivity is the time of the last real game event (moves arrive as
+	// gameState; keep-alive pings are stripped before the handler, so they don't reset it).
+	gameCtx, cancelGame := context.WithCancel(ctx)
+	defer cancelGame()
+	var lastActivity int64
+	atomic.StoreInt64(&lastActivity, time.Now().UnixNano())
+	go b.watchGameStall(gameCtx, gameID, body, &lastActivity)
+
 	var (
 		myColor    position.Color
 		initialFEN = position.StartingPosition
@@ -256,6 +272,7 @@ func (b *Bot) playGame(ctx context.Context, gameID string) {
 	)
 
 	err = streamNDJSON(body, func(line []byte) error {
+		atomic.StoreInt64(&lastActivity, time.Now().UnixNano())
 		var env envelope
 		if err := json.Unmarshal(line, &env); err != nil {
 			return nil
@@ -293,6 +310,33 @@ func (b *Bot) playGame(ctx context.Context, gameID string) {
 		b.Logf("game %s: stream error: %v", gameID, err)
 	}
 	b.Logf("game %s: finished", gameID)
+}
+
+// watchGameStall abandons a game that has made no progress for staleGameTimeout: it asks Lichess to abort
+// the game (falling back to resign if there are too many moves to abort) and closes the stream, which
+// unblocks playGame's read so the game slot is released. It exits when the game ends normally (gameCtx
+// cancelled).
+func (b *Bot) watchGameStall(ctx context.Context, gameID string, body io.Closer, lastActivity *int64) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			idle := time.Since(time.Unix(0, atomic.LoadInt64(lastActivity)))
+			if idle < staleGameTimeout {
+				continue
+			}
+			b.Logf("game %s: no progress for %s, abandoning", gameID, idle.Round(time.Second))
+			if err := b.client.Abort(ctx, gameID); err != nil {
+				_ = b.client.Resign(ctx, gameID)
+			}
+			_ = body.Close() // unblock playGame's stream read so it returns and frees the slot
+			return
+		}
+	}
 }
 
 // ponderState tracks an in-progress "think on the opponent's clock" search for one game.

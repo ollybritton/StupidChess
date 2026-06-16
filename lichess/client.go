@@ -152,6 +152,19 @@ func (c *Client) MakeMove(ctx context.Context, gameID, uci string) error {
 	return c.doAction(ctx, http.MethodPost, "/api/bot/game/"+gameID+"/move/"+uci, nil)
 }
 
+// Abort aborts a game in which too few moves have been played to resign (POST
+// /api/bot/game/{id}/abort). Used by the stall watchdog to walk away from a game that is making no
+// progress (e.g. an opponent that has disconnected).
+func (c *Client) Abort(ctx context.Context, gameID string) error {
+	return c.doAction(ctx, http.MethodPost, "/api/bot/game/"+gameID+"/abort", nil)
+}
+
+// Resign resigns a game (POST /api/bot/game/{id}/resign). The stall watchdog falls back to this when a
+// game is too far along to abort.
+func (c *Client) Resign(ctx context.Context, gameID string) error {
+	return c.doAction(ctx, http.MethodPost, "/api/bot/game/"+gameID+"/resign", nil)
+}
+
 // AcceptChallenge accepts an incoming challenge (POST /api/challenge/{id}/accept).
 func (c *Client) AcceptChallenge(ctx context.Context, challengeID string) error {
 	return c.doAction(ctx, http.MethodPost, "/api/challenge/"+challengeID+"/accept", nil)
