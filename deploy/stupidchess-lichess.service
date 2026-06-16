@@ -22,7 +22,7 @@ EnvironmentFile=/home/olly/.config/stupidchess/lichess.env
 # --max-games 1: only ever one game at a time, so that one game gets the whole machine.
 # --threads 6 matches the 6-core host. --syzygy-path / --eval-file enable the endgame
 # tablebases and the NNUE network (both staged on the host, see deploy notes below).
-ExecStart=/home/olly/bin/stupidchess lichess play -e tryhard --seek --max-games 1 --threads 6 --syzygy-path /home/olly/syzygy --eval-file /home/olly/nnue/net.nnue
+ExecStart=/home/olly/bin/stupidchess lichess play -e tryhard --seek --max-games 1 --threads 6 --syzygy-path /home/olly/syzygy --eval-file /home/olly/nnue/nn-ka1024.nnue
 Restart=on-failure
 RestartSec=5
 
