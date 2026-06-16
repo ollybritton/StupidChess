@@ -165,9 +165,12 @@ type searchParams struct {
 	deltaMargin int // quiescence delta-pruning safety margin
 }
 
+// defaultSearchParams reproduce the engine's prior behaviour. The LMR coefficients (base 1.00, divisor
+// 2.00) are chosen so the logarithmic reduction matches the old step table closely across the common
+// (depth, moveCount) range rather than under-reducing, which an earlier 0.75/2.25 default did.
 var defaultSearchParams = searchParams{
-	lmrBase:     75,
-	lmrDiv:      225,
+	lmrBase:     100,
+	lmrDiv:      200,
 	rfpMargin:   80,
 	futMargin:   100,
 	deltaMargin: 200,
@@ -187,8 +190,8 @@ type ParamSpec struct {
 // options and the SPSA tuner. The LMR coefficients are fixed-point (x100).
 func TunableParams() []ParamSpec {
 	return []ParamSpec{
-		{"LMRBase", 75, 20, 150, 8},
-		{"LMRDiv", 225, 120, 400, 20},
+		{"LMRBase", 100, 40, 180, 8},
+		{"LMRDiv", 200, 120, 320, 15},
 		{"RFPMargin", 80, 40, 160, 8},
 		{"FutilityMargin", 100, 50, 220, 10},
 		{"DeltaMargin", 200, 100, 400, 20},
