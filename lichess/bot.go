@@ -23,6 +23,10 @@ const reconnectDelay = 5 * time.Second
 const (
 	matchmakeInterval = 10 * time.Second
 	challengeCooldown = 25 * time.Second
+	// rateLimitBackoff is how long the bot stops sending challenges after Lichess rate-limits one (HTTP
+	// 429). Without it the matchmaker keeps poking every challengeCooldown, which keeps the account
+	// throttled instead of letting the limit reset.
+	rateLimitBackoff = 5 * time.Minute
 )
 
 // staleGameTimeout is how long a game may go with no move by either side before the bot abandons it.
@@ -55,9 +59,10 @@ type Bot struct {
 
 	me string // lowercased account id, learned at startup
 
-	mu       sync.Mutex      // guards games
-	games    map[string]bool // game ids currently being played
-	lastSeek int64           // unix nanos of the last challenge we sent (atomic)
+	mu               sync.Mutex      // guards games
+	games            map[string]bool // game ids currently being played
+	lastSeek         int64           // unix nanos of the last challenge we sent (atomic)
+	seekBackoffUntil int64           // unix nanos before which we won't seek, after a rate limit (atomic)
 }
 
 // NewBot builds a bot that drives games with movers from newMover (one per game).
@@ -181,6 +186,10 @@ func (b *Bot) matchmake(ctx context.Context) {
 		if b.gameCount() >= b.MaxGames {
 			continue
 		}
+		// Respect a rate-limit backoff before doing anything else.
+		if until := atomic.LoadInt64(&b.seekBackoffUntil); until != 0 && time.Now().UnixNano() < until {
+			continue
+		}
 		// Don't pile up challenges: wait for the last one to be accepted or to expire first.
 		if last := atomic.LoadInt64(&b.lastSeek); last != 0 && time.Since(time.Unix(0, last)) < challengeCooldown {
 			continue
@@ -212,6 +221,10 @@ func (b *Bot) seekGame(ctx context.Context) {
 
 	if err := b.client.Challenge(ctx, target, b.Challenge); err != nil {
 		b.Logf("matchmaking: could not challenge %s: %v", target, err)
+		if strings.Contains(err.Error(), "429") {
+			atomic.StoreInt64(&b.seekBackoffUntil, time.Now().Add(rateLimitBackoff).UnixNano())
+			b.Logf("matchmaking: rate-limited, backing off %s before seeking again", rateLimitBackoff)
+		}
 		return
 	}
 	b.Logf("matchmaking: challenged %s", target)
