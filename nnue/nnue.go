@@ -258,9 +258,7 @@ func (a *Accumulator) refreshPerspective(n *Network, pos *position.Position, per
 			continue
 		}
 		col := n.ftWeightColumn(MakeIndex(perspective, sq, pc, orientedKing))
-		for j := 0; j < TransformedFeatureDimensions; j++ {
-			acc[j] += col[j]
-		}
+		addInt16(acc[:], col, TransformedFeatureDimensions)
 	}
 }
 
@@ -270,9 +268,7 @@ func (a *Accumulator) refreshPerspective(n *Network, pos *position.Position, per
 func (a *Accumulator) Add(n *Network, perspective position.Color, index uint32) {
 	acc := &a.accumulation[perspectiveIndex(perspective)]
 	col := n.ftWeightColumn(index)
-	for j := 0; j < TransformedFeatureDimensions; j++ {
-		acc[j] += col[j]
-	}
+	addInt16(acc[:], col, TransformedFeatureDimensions)
 }
 
 // Remove deactivates a single feature in the given perspective's accumulation
@@ -281,9 +277,7 @@ func (a *Accumulator) Add(n *Network, perspective position.Color, index uint32) 
 func (a *Accumulator) Remove(n *Network, perspective position.Color, index uint32) {
 	acc := &a.accumulation[perspectiveIndex(perspective)]
 	col := n.ftWeightColumn(index)
-	for j := 0; j < TransformedFeatureDimensions; j++ {
-		acc[j] -= col[j]
-	}
+	subInt16(acc[:], col, TransformedFeatureDimensions)
 }
 
 // featureChange is a single non-king piece placement (a piece appearing on, or
@@ -393,15 +387,11 @@ func (a *Accumulator) Update(n *Network, prev *Accumulator, pos *position.Positi
 		acc := &a.accumulation[p]
 		for i := 0; i < nr; i++ {
 			col := n.ftWeightColumn(MakeIndex(perspective, removed[i].sq, removed[i].piece, orientedKing))
-			for j := 0; j < TransformedFeatureDimensions; j++ {
-				acc[j] -= col[j]
-			}
+			subInt16(acc[:], col, TransformedFeatureDimensions)
 		}
 		for i := 0; i < na; i++ {
 			col := n.ftWeightColumn(MakeIndex(perspective, added[i].sq, added[i].piece, orientedKing))
-			for j := 0; j < TransformedFeatureDimensions; j++ {
-				acc[j] += col[j]
-			}
+			addInt16(acc[:], col, TransformedFeatureDimensions)
 		}
 	}
 	a.computed = true
@@ -615,12 +605,7 @@ func (n *Network) EvalWith(acc *Accumulator, sideToMove position.Color) int16 {
 func affine(in []uint8, weights []int8, biases []int32, out []int32) {
 	inDim := len(in)
 	for i := range out {
-		sum := biases[i]
-		row := weights[i*inDim : i*inDim+inDim]
-		for j := 0; j < inDim; j++ {
-			sum += int32(row[j]) * int32(in[j])
-		}
-		out[i] = sum
+		out[i] = biases[i] + dotInt8(in, weights[i*inDim:i*inDim+inDim], inDim)
 	}
 }
 

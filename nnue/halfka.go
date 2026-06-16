@@ -277,9 +277,7 @@ func (a *KAAccumulator) refreshPerspective(n *KANetwork, pos *position.Position,
 		}
 		index := kaMakeIndex(perspective, sq, pc, ksq)
 		col := n.ftWeightColumn(index)
-		for j := 0; j < KAHalfDims; j++ {
-			acc[j] += col[j]
-		}
+		addInt16(acc[:], col, KAHalfDims)
 		pcol := n.psqtColumn(index)
 		for k := 0; k < KAPSQTBuckets; k++ {
 			psqt[k] += pcol[k]
@@ -447,12 +445,7 @@ func (n *KANetwork) EvalWith(acc *KAAccumulator, sideToMove position.Color, piec
 // beyond that are not referenced.
 func kaAffine(in []uint8, weights []int8, biases []int32, out []int32, paddedIn, inDims int) {
 	for i := range out {
-		sum := biases[i]
-		row := weights[i*paddedIn : i*paddedIn+inDims]
-		for j := 0; j < inDims; j++ {
-			sum += int32(row[j]) * int32(in[j])
-		}
-		out[i] = sum
+		out[i] = biases[i] + dotInt8(in, weights[i*paddedIn:i*paddedIn+inDims], inDims)
 	}
 }
 

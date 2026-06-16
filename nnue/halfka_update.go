@@ -35,9 +35,7 @@ type kaFeatureChange struct {
 func (a *KAAccumulator) addColumn(n *KANetwork, p int, index uint32) {
 	acc := &a.accumulation[p]
 	col := n.ftWeightColumn(index)
-	for j := 0; j < KAHalfDims; j++ {
-		acc[j] += col[j]
-	}
+	addInt16(acc[:], col, KAHalfDims)
 	psqt := &a.psqt[p]
 	pcol := n.psqtColumn(index)
 	for k := 0; k < KAPSQTBuckets; k++ {
@@ -50,9 +48,7 @@ func (a *KAAccumulator) addColumn(n *KANetwork, p int, index uint32) {
 func (a *KAAccumulator) subColumn(n *KANetwork, p int, index uint32) {
 	acc := &a.accumulation[p]
 	col := n.ftWeightColumn(index)
-	for j := 0; j < KAHalfDims; j++ {
-		acc[j] -= col[j]
-	}
+	subInt16(acc[:], col, KAHalfDims)
 	psqt := &a.psqt[p]
 	pcol := n.psqtColumn(index)
 	for k := 0; k < KAPSQTBuckets; k++ {
