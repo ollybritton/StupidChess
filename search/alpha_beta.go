@@ -69,10 +69,11 @@ type AlphaBetaSearch struct {
 	evalUs   position.Evaluator
 	evalThem position.Evaluator
 
-	// inc, when non-nil, is an incremental NNUE evaluator used in place of evalUs/evalThem. It carries an
-	// accumulator stack updated as the search makes and unmakes moves, so it is per-worker: Root clones it
-	// for each Lazy-SMP thread. nil means the hand-crafted evaluators above are used instead.
-	inc *nnueEvaluator
+	// inc, when non-nil, is an incremental NNUE evaluator (HalfKP or HalfKAv2_hm) used in place of
+	// evalUs/evalThem. It carries an accumulator stack updated as the search makes and unmakes moves, so it
+	// is per-worker: Root spawns a fresh one for each Lazy-SMP thread. nil means the hand-crafted
+	// evaluators above are used instead.
+	inc incEvaluator
 
 	startTime time.Time
 	nodeCount int // this worker's local node count (flushed in batches into sh.nodes)
@@ -254,14 +255,25 @@ func (s *AlphaBetaSearch) SetTablebases(tb *syzygy.Tablebases) {
 	s.tb = tb
 }
 
-// SetNNUE switches the evaluation to an incremental NNUE network (nil reverts to the hand-crafted
-// evaluators set with SetEvaluator). Call it between searches; Root clones the evaluator per worker.
+// SetNNUE switches the evaluation to an incremental classic HalfKP network (nil reverts to the
+// hand-crafted evaluators set with SetEvaluator). Call it between searches; Root spawns the evaluator per
+// worker.
 func (s *AlphaBetaSearch) SetNNUE(net *nnue.Network) {
 	if net == nil {
 		s.inc = nil
 		return
 	}
 	s.inc = newNNUEEvaluator(net)
+}
+
+// SetNNUEKA switches the evaluation to an incremental modern HalfKAv2_hm network (nil reverts to the
+// hand-crafted evaluators). Like SetNNUE but for the bigger architecture.
+func (s *AlphaBetaSearch) SetNNUEKA(net *nnue.KANetwork) {
+	if net == nil {
+		s.inc = nil
+		return
+	}
+	s.inc = newKAEvaluator(net)
 }
 
 // makeMove applies a move to pos and, if NNUE is active, updates the incremental accumulator. It returns
@@ -445,7 +457,7 @@ func (s *AlphaBetaSearch) Root() error {
 				// Each worker needs its own incremental accumulator (the stack is mutated during search),
 				// rebuilt from the root position it is about to search.
 				if s.inc != nil {
-					w.inc = newNNUEEvaluator(s.inc.net)
+					w.inc = s.inc.spawn()
 					w.inc.reset(board)
 				}
 

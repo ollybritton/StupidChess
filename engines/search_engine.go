@@ -116,21 +116,37 @@ func (e *searchEngine) setSyzygy(path string) {
 }
 
 // setEvalFile switches the evaluation to an NNUE network (or, for an empty path, back to the engine's
-// own hand-crafted evaluation). The network is evaluated incrementally by the search, so it is handed to
-// the searcher whole rather than wrapped as a stateless function.
+// own hand-crafted evaluation). It auto-detects the architecture - classic HalfKP or modern
+// HalfKAv2_hm - and loads the matching evaluator. The network is evaluated incrementally by the search,
+// so it is handed to the searcher whole rather than wrapped as a stateless function.
 func (e *searchEngine) setEvalFile(path string) {
 	if path == "" {
 		e.searcher.SetNNUE(nil)
 		e.searcher.SetEvaluator(e.defaultEvalUs, e.defaultEvalThem)
 		return
 	}
+	arch, err := nnue.Architecture(path)
+	if err != nil {
+		fmt.Printf("info string could not read nnue header from %q: %v\n", path, err)
+		return
+	}
+	if arch == "halfka" {
+		net, err := nnue.LoadKA(path)
+		if err != nil {
+			fmt.Printf("info string could not load HalfKAv2_hm nnue from %q: %v\n", path, err)
+			return
+		}
+		e.searcher.SetNNUEKA(net)
+		fmt.Printf("info string nnue (HalfKAv2_hm) loaded from %s (hash ok: %v)\n", path, net.HashOK)
+		return
+	}
 	net, err := nnue.Load(path)
 	if err != nil {
-		fmt.Printf("info string could not load nnue from %q: %v\n", path, err)
+		fmt.Printf("info string could not load HalfKP nnue from %q: %v\n", path, err)
 		return
 	}
 	e.searcher.SetNNUE(net)
-	fmt.Printf("info string nnue loaded from %s (hash ok: %v)\n", path, net.HashOK)
+	fmt.Printf("info string nnue (HalfKP) loaded from %s (hash ok: %v)\n", path, net.HashOK)
 }
 
 // PonderHit forwards to the searcher: the pondered move was played, so the clock starts now.

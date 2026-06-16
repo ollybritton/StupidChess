@@ -751,6 +751,19 @@ func (b *byteReader) int16Slice(dst []int16) error {
 	return nil
 }
 
+// int32Slice fills dst with little-endian int32 values, reading in bulk. Used by
+// the HalfKAv2_hm loader for the FT PSQT weights.
+func (b *byteReader) int32Slice(dst []int32) error {
+	raw := make([]byte, len(dst)*4)
+	if _, err := io.ReadFull(b.r, raw); err != nil {
+		return err
+	}
+	for i := range dst {
+		dst[i] = int32(binary.LittleEndian.Uint32(raw[i*4:]))
+	}
+	return nil
+}
+
 // int8Slice fills dst with int8 values read directly from the stream.
 func (b *byteReader) int8Slice(dst []int8) error {
 	raw := make([]byte, len(dst))

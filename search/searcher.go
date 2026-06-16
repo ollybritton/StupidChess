@@ -18,8 +18,10 @@ type Searcher interface {
 	SetThreads(n int)
 	// SetEvaluator swaps the hand-crafted evaluation functions (e.g. between personalities).
 	SetEvaluator(evalUs, evalThem position.Evaluator)
-	// SetNNUE switches evaluation to an incremental NNUE network (nil reverts to the hand-crafted eval).
+	// SetNNUE switches evaluation to an incremental classic HalfKP network (nil reverts to hand-crafted).
 	SetNNUE(net *nnue.Network)
+	// SetNNUEKA switches evaluation to an incremental modern HalfKAv2_hm network (nil reverts).
+	SetNNUEKA(net *nnue.KANetwork)
 	// SetTablebases installs (nil clears) the Syzygy endgame tablebases.
 	SetTablebases(tb *syzygy.Tablebases)
 	// SetParam sets a tunable search parameter by UCI option name (used by the SPSA tuner). Unknown
