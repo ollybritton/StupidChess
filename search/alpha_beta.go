@@ -165,15 +165,18 @@ type searchParams struct {
 	deltaMargin int // quiescence delta-pruning safety margin
 }
 
-// defaultSearchParams reproduce the engine's prior behaviour. The LMR coefficients (base 1.00, divisor
-// 2.00) are chosen so the logarithmic reduction matches the old step table closely across the common
-// (depth, moveCount) range rather than under-reducing, which an earlier 0.75/2.25 default did.
+// defaultSearchParams were found by self-play SPSA tuning against the NNUE evaluation (match.RunSPSA),
+// the configuration the bot actually plays in. They all point the same way - less aggressive pruning than
+// the hand-set starting values (LMR reduces less, the futility / reverse-futility / delta margins are
+// wider) - because an accurate eval is worth searching out rather than pruning past. Measured +55 +/- 21
+// Elo over the previous values on NNUE (SPRT accepted). Tuned for NNUE; the hand-crafted-eval engines
+// inherit them too, where less pruning is a safe if slightly slower direction.
 var defaultSearchParams = searchParams{
-	lmrBase:     100,
-	lmrDiv:      200,
-	rfpMargin:   80,
-	futMargin:   100,
-	deltaMargin: 200,
+	lmrBase:     74,
+	lmrDiv:      252,
+	rfpMargin:   118,
+	futMargin:   135,
+	deltaMargin: 338,
 }
 
 // ParamSpec describes one tunable search parameter: its UCI option name, default, the bounds the tuner
@@ -189,12 +192,14 @@ type ParamSpec struct {
 // TunableParams returns the tunable search parameters, in a fixed order shared by the engine's UCI
 // options and the SPSA tuner. The LMR coefficients are fixed-point (x100).
 func TunableParams() []ParamSpec {
+	// Defaults are the SPSA-tuned values (see defaultSearchParams). Bounds straddle them so a follow-up
+	// run can refine in either direction.
 	return []ParamSpec{
-		{"LMRBase", 100, 40, 180, 8},
-		{"LMRDiv", 200, 120, 320, 15},
-		{"RFPMargin", 80, 40, 160, 8},
-		{"FutilityMargin", 100, 50, 220, 10},
-		{"DeltaMargin", 200, 100, 400, 20},
+		{"LMRBase", 74, 40, 180, 8},
+		{"LMRDiv", 252, 150, 360, 15},
+		{"RFPMargin", 118, 60, 180, 8},
+		{"FutilityMargin", 135, 60, 240, 10},
+		{"DeltaMargin", 338, 180, 460, 20},
 	}
 }
 
