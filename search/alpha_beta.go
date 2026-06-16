@@ -767,21 +767,17 @@ func (s *AlphaBetaSearch) search(alpha int16, beta int16, depth uint, ply int, p
 		s.pathHashes[ply] = hash // record this node so deeper nodes can detect a repetition back to it
 	}
 
-	// Syzygy tablebases: in an endgame with few enough pieces the exact result is known, so we can stop
-	// here with perfect knowledge instead of searching on. A win/loss is scored just under a real mate
-	// (and nearer the root scores higher, to make progress); cursed wins / blessed losses depend on the
-	// fifty-move counter, so they are treated conservatively as draws.
+	// Syzygy tablebases: in an endgame with few enough pieces the exact result is known. A drawn position
+	// is cut off at once - there is nothing to gain by searching a dead draw, and recognising it stops the
+	// engine throwing a win away into one. Won and lost positions are NOT truncated, though: the tables we
+	// ported give only the win/draw/loss verdict, not the distance to mate (DTZ), so a flat win score
+	// makes every winning move look identical and the engine just shuffles (this is exactly the "rook and
+	// king made random moves and drew" bug). Letting the search run instead lets its mate detection and
+	// evaluation drive the conversion, while the draw probe above still guards against blundering the win.
 	if s.tb != nil && ply > 0 {
 		if bits.OnesCount64(uint64(pos.Occupied[position.White]|pos.Occupied[position.Black])) <= s.tb.MaxPieces() {
-			if wdl, ok := s.tb.ProbeWDL(pos); ok {
-				switch {
-				case wdl >= 2:
-					return tbWinScore - int16(ply)
-				case wdl <= -2:
-					return -tbWinScore + int16(ply)
-				default:
-					return drawScore
-				}
+			if wdl, ok := s.tb.ProbeWDL(pos); ok && wdl > -2 && wdl < 2 {
+				return drawScore // draw, cursed win or blessed loss: a dead draw under the fifty-move rule
 			}
 		}
 	}

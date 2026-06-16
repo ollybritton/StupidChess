@@ -42,6 +42,7 @@ type bucket struct {
 
 // tbTable is a single loaded .rtbw material configuration.
 type tbTable struct {
+	ready     int32 // 1 once initTableWDL has parsed this table; read atomically on the probe hot path
 	key       uint64
 	symmetric bool
 	hasPawns  bool

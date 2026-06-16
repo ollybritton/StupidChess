@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ollybritton/StupidChess/position"
 )
@@ -23,8 +24,7 @@ type Tablebases struct {
 	byKey     map[uint64]*tbTable
 	maxPieces int
 
-	mu    sync.Mutex // guards lazy initTableWDL via ensureReady
-	ready map[*tbTable]bool
+	mu sync.Mutex // serialises the one-time lazy initTableWDL; the hot path uses tbTable.ready atomically
 }
 
 // Load opens every .rtbw file in dir and returns a Tablebases ready for
@@ -38,7 +38,6 @@ func Load(dir string) (*Tablebases, error) {
 
 	tb := &Tablebases{
 		byKey: make(map[uint64]*tbTable),
-		ready: make(map[*tbTable]bool),
 	}
 
 	names := make([]string, 0, len(entries))
@@ -94,17 +93,22 @@ func Load(dir string) (*Tablebases, error) {
 // MaxPieces returns the largest number of pieces among the loaded tables.
 func (tb *Tablebases) MaxPieces() int { return tb.maxPieces }
 
-// ensureReady lazily parses a table's internal structure on first use.
+// ensureReady lazily parses a table's internal structure on first use. The common case (already parsed)
+// is a single atomic load with no lock, so the many probes a deep endgame search makes do not serialise
+// on the mutex across the search threads; the lock is taken only to do the one-time parse.
 func (tb *Tablebases) ensureReady(t *tbTable) error {
+	if atomic.LoadInt32(&t.ready) != 0 {
+		return nil
+	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	if tb.ready[t] {
+	if atomic.LoadInt32(&t.ready) != 0 { // re-check: another thread may have parsed it while we waited
 		return nil
 	}
 	if err := t.initTableWDL(); err != nil {
 		return err
 	}
-	tb.ready[t] = true
+	atomic.StoreInt32(&t.ready, 1)
 	return nil
 }
 
