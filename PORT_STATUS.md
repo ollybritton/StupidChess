@@ -69,21 +69,30 @@ cross-checked against python-chess 1.11.2 on the same testdata.
 `ok == false` and that probing terminates (guards a previously observed panic +
 infinite-loop). All syzygy tests pass with no skips.
 
+### DTZ (now implemented)
+
+- DTZ probing IS implemented: `.rtbz` parsing, `ProbeDTZ` (probe_dtz), and
+  `ProbeRoot` (probe_root root-move selection) are ported from Fathom's
+  tbprobe.c. The search plays the `ProbeRoot` move directly at the root, so won
+  endgames convert optimally under the fifty-move rule.
+- Verified against python-chess as an oracle: `ProbeDTZ` matched on 11,254
+  positions across all six fixture material types (only the documented
+  old-vs-new mate-in-1 rounding differs, compensated in `probe_root`).
+  `ProbeRoot` was optimal and win-preserving on 11,379 positions.
+
 ### Uncertain / TODO
 
-- DTZ is not implemented. The `.rtbz` (distance-to-zero) files are present in
-  `testdata/syzygy/` but no DTZ parser, `ProbeDTZ`, or root-move ranking exists.
-  Without DTZ the prober cannot be used to actually convert a won endgame at the
-  root under the 50-move rule; it only classifies WDL.
 - Validation breadth is narrow: only 3-man tables and a single 4-man table
   (KQvKR) are exercised. Pawn tables are covered only by KPvK. There is no
   test over 4-man tables with pawns (e.g. KPvKP beyond KPvK), no 5-man+ table,
   and no large random/perft-style cross-check against an external prober. The
   pawn-file / multi-file (`files == 4`) and split-table (`split`) code paths are
   therefore only lightly exercised.
-- No DTZ means no integration with search; the package is not consumed anywhere
-  in the engine yet.
-- Cursed-win / blessed-loss values (`±1`) are produced by the code path but are
+- The cursed-win / blessed-loss DTZ path (`wdl == ±1`, the `dtz += 100` offset
+  and the mapped-value doubling) is ported verbatim from C but not exercised by
+  the small 3-4-man fixtures (which contain no cursed wins); the live 3-4-5
+  tables on the server will exercise it, but it has no local oracle test.
+- Cursed-win / blessed-loss WDL values (`±1`) are produced by the code path but are
   not directly asserted by any test case (all expected values are in
   `{-2,0,2}`).
 
