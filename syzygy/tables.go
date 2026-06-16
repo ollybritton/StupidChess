@@ -30,6 +30,20 @@ const tbPieces = 6
 // every .rtbw file.
 var wdlMagic = [4]byte{0x71, 0xE8, 0x23, 0x5D}
 
+// dtzMagic is DTZ_MAGIC (0xa50c66d7) as the four little-endian bytes that begin
+// every .rtbz file.
+var dtzMagic = [4]byte{0xD7, 0x66, 0x0C, 0xA5}
+
+// DTZ value post-processing tables (tbprobe.c). wdlToMap selects the per-WDL-class
+// map sub-table; paFlags is the "value already exact" accuracy bit per WDL class;
+// wdlToDtz is the canonical DTZ for a WDL outcome (used in the en-passant ladder).
+// All three are indexed by wdl+2 (wdl in -2..2).
+var (
+	wdlToMap = [5]uint8{1, 3, 0, 2, 0}
+	paFlags  = [5]uint8{8, 0, 0, 0, 4}
+	wdlToDtz = [5]int{-1, -101, 0, 101, 1}
+)
+
 // Material-signature primes (calc_key). Copied from tbprobe.c.
 const (
 	primeWhiteQueen  uint64 = 11811845319353239651

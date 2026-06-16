@@ -12,8 +12,8 @@ import (
 // and ordinary scores must pass through untouched.
 func TestMateScoreTTRoundTrip(t *testing.T) {
 	for _, ply := range []int{0, 1, 5, 20} {
-		win := position.MaxEval - 3   // mate we deliver
-		lose := position.MinEval + 3  // mate against us
+		win := position.MaxEval - 3  // mate we deliver
+		lose := position.MinEval + 3 // mate against us
 		assert.Equal(t, win, scoreFromTT(scoreToTT(win, ply), ply), "win mate ply %d", ply)
 		assert.Equal(t, lose, scoreFromTT(scoreToTT(lose, ply), ply), "lose mate ply %d", ply)
 		assert.Equal(t, int16(42), scoreToTT(42, ply), "normal score unchanged")

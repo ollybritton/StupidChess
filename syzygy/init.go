@@ -364,11 +364,14 @@ func calcSymLen(pd *pairsData, s int, tmp []byte) {
 	tmp[s] = 1
 }
 
-// setupPairs ports setup_pairs (wdl=1). raw is the whole file; off is the
-// offset of the PairsData header. tbSize is the table size for this bucket.
-// Returns the pairsData, the size[3] array, and the offset just past the header
-// (the C "next").
-func setupPairs(raw []byte, off int, tbSize uint64) (pd *pairsData, size [3]uint64, next int, flags uint8, err error) {
+// setupPairs ports setup_pairs. raw is the whole file; off is the offset of the
+// PairsData header. tbSize is the table size for this bucket. The wdl flag mirrors
+// the C parameter: in the single-valued branch (data[0]&0x80) a WDL stream stores
+// its constant in data[1], but a DTZ stream uses min_len=0 (so a const DTZ table
+// decodes to its true raw value, which is 0 for an always-draw table). Returns the
+// pairsData, the size[3] array, the offset just past the header (the C "next") and
+// the flags byte.
+func setupPairs(raw []byte, off int, tbSize uint64, wdl bool) (pd *pairsData, size [3]uint64, next int, flags uint8, err error) {
 	if off >= len(raw) {
 		err = fmt.Errorf("syzygy: pairs header out of range")
 		return
@@ -377,9 +380,13 @@ func setupPairs(raw []byte, off int, tbSize uint64) (pd *pairsData, size [3]uint
 	flags = raw[off]
 	if raw[off]&0x80 != 0 {
 		pd.idxbits = 0
-		pd.minLen = int32(raw[off+1]) // wdl=1 path
+		if wdl {
+			pd.minLen = int32(raw[off+1])
+		} else {
+			pd.minLen = 0
+		}
 		pd.isConst = true
-		pd.constValue = raw[off+1]
+		pd.constValue = uint8(pd.minLen)
 		next = off + 2
 		return
 	}
@@ -471,7 +478,7 @@ func (t *tbTable) initTableWDL() error {
 		data = align2(data)
 
 		var sz0, sz1 [3]uint64
-		pd0, s0, next, _, err := setupPairs(raw, data, size0)
+		pd0, s0, next, _, err := setupPairs(raw, data, size0, true)
 		if err != nil {
 			return err
 		}
@@ -480,7 +487,7 @@ func (t *tbTable) initTableWDL() error {
 		data = next
 
 		if t.split {
-			pd1, s1, next2, _, err := setupPairs(raw, data, size1)
+			pd1, s1, next2, _, err := setupPairs(raw, data, size1, true)
 			if err != nil {
 				return err
 			}
@@ -534,7 +541,7 @@ func (t *tbTable) initTableWDL() error {
 
 	var sz [4][2][3]uint64
 	for f := 0; f < t.files; f++ {
-		pd0, s0, next, _, err := setupPairs(raw, data, tbSize[f][0])
+		pd0, s0, next, _, err := setupPairs(raw, data, tbSize[f][0], true)
 		if err != nil {
 			return err
 		}
@@ -542,7 +549,7 @@ func (t *tbTable) initTableWDL() error {
 		t.buckets[f][0].precomp = pd0
 		data = next
 		if t.split {
-			pd1, s1, next2, _, err := setupPairs(raw, data, tbSize[f][1])
+			pd1, s1, next2, _, err := setupPairs(raw, data, tbSize[f][1], true)
 			if err != nil {
 				return err
 			}
@@ -679,4 +686,156 @@ func decompressPairs(d *pairsData, idx uint64) uint8 {
 
 func bswap32(x uint32) uint32 {
 	return (x >> 24) | ((x >> 8) & 0x0000ff00) | ((x << 8) & 0x00ff0000) | (x << 24)
+}
+
+// --- DTZ (.rtbz) parsing ---
+
+// setupPiecesPieceDTZ ports setup_pieces_piece_dtz. Unlike the WDL variant it
+// fills a single (side-less) dtzBucket from the low nibble of each header byte.
+// data starts at the piece-list header byte. Returns tb_size[0].
+func (t *tbTable) setupPiecesPieceDTZ(data []byte) uint64 {
+	b := t.dtzBucket[0]
+	for i := 0; i < t.num; i++ {
+		b.pieces[i] = data[i+1] & 0x0f
+	}
+	order := int(data[0] & 0x0f)
+	setNormPiece(t.num, t.encType, b.norm[:], b.pieces[:])
+	return calcFactorsPiece(b.factor[:], t.num, order, b.norm[:], t.encType)
+}
+
+// setupPiecesPawnDTZ ports setup_pieces_pawn_dtz for file f. data starts at the
+// per-file header. Returns tb_size[0] for that file.
+func (t *tbTable) setupPiecesPawnDTZ(data []byte, f int) uint64 {
+	j := 1
+	if t.pawns[1] > 0 {
+		j = 2
+	}
+	b := t.dtzBucket[f]
+	order := int(data[0] & 0x0f)
+	order2 := 0x0f
+	if t.pawns[1] != 0 {
+		order2 = int(data[1] & 0x0f)
+	}
+	for i := 0; i < t.num; i++ {
+		b.pieces[i] = data[i+j] & 0x0f
+	}
+	setNormPawn(t.num, t.pawns, b.norm[:], b.pieces[:])
+	return calcFactorsPawn(b.factor[:], t.num, order, order2, b.norm[:], f)
+}
+
+// initTableDTZ ports init_table_dtz (tbcore.c). It parses the already-loaded
+// dtzRaw bytes and fills the single-sided dtzBucket(s) with pairsData plus the
+// flags / map[] re-encoding the DTZ probe needs. It reuses align2/align64/
+// bytesToU16/setupPairs unchanged; setupPairs is called with wdl=false.
+//
+// A .rtbz is single-sided: only data[4]&0x02 (files) is read; the low bit of
+// byte 4 is NOT a split flag and is deliberately ignored.
+func (t *tbTable) initTableDTZ() error {
+	raw := t.dtzRaw
+	if len(raw) < 5 {
+		return fmt.Errorf("syzygy: dtz file too small")
+	}
+	if raw[0] != dtzMagic[0] || raw[1] != dtzMagic[1] || raw[2] != dtzMagic[2] || raw[3] != dtzMagic[3] {
+		return fmt.Errorf("syzygy: bad dtz magic in %s", t.name)
+	}
+
+	files := 1
+	if raw[4]&0x02 != 0 {
+		files = 4
+	}
+	t.dtzFiles = files
+
+	data := 5
+
+	if !t.hasPawns {
+		t.dtzBucket[0] = &dtzBucket{}
+		size := t.setupPiecesPieceDTZ(raw[data:])
+		data += t.num + 1
+		data = align2(data)
+
+		pd, sz, next, flags, err := setupPairs(raw, data, size, false)
+		if err != nil {
+			return err
+		}
+		t.dtzBucket[0].precomp = pd
+		t.dtzFlags[0] = flags
+		data = next
+
+		mapBase := data
+		t.dtzMap = raw[mapBase:]
+		if flags&2 != 0 {
+			for i := 0; i < 4; i++ {
+				t.dtzMapIdx[0][i] = uint16(data - mapBase + 1)
+				if data >= len(raw) {
+					return fmt.Errorf("syzygy: dtz map out of range in %s", t.name)
+				}
+				data += 1 + int(raw[data])
+			}
+			data = align2(data)
+		}
+
+		pd.indextable = raw[data:]
+		data += int(sz[0])
+		pd.sizetable = bytesToU16(raw[data : data+int(sz[1])])
+		data += int(sz[1])
+		data = align64(data)
+		pd.data = raw[data:]
+		data += int(sz[2])
+		return nil
+	}
+
+	// Pawn table.
+	s := 1
+	if t.pawns[1] > 0 {
+		s = 2
+	}
+	var tbSize [4]uint64
+	for f := 0; f < 4; f++ {
+		t.dtzBucket[f] = &dtzBucket{}
+		tbSize[f] = t.setupPiecesPawnDTZ(raw[data:], f)
+		data += t.num + s
+	}
+	data = align2(data)
+
+	var sz [4][3]uint64
+	for f := 0; f < files; f++ {
+		pd, s0, next, flags, err := setupPairs(raw, data, tbSize[f], false)
+		if err != nil {
+			return err
+		}
+		sz[f] = s0
+		t.dtzBucket[f].precomp = pd
+		t.dtzFlags[f] = flags
+		data = next
+	}
+
+	mapBase := data
+	t.dtzMap = raw[mapBase:]
+	for f := 0; f < files; f++ {
+		if t.dtzFlags[f]&2 != 0 {
+			for i := 0; i < 4; i++ {
+				t.dtzMapIdx[f][i] = uint16(data - mapBase + 1)
+				if data >= len(raw) {
+					return fmt.Errorf("syzygy: dtz pawn map out of range in %s", t.name)
+				}
+				data += 1 + int(raw[data])
+			}
+		}
+	}
+	data = align2(data) // single align2 after the whole file loop (cf. per-file in non-pawn)
+
+	for f := 0; f < files; f++ {
+		t.dtzBucket[f].precomp.indextable = raw[data:]
+		data += int(sz[f][0])
+	}
+	for f := 0; f < files; f++ {
+		t.dtzBucket[f].precomp.sizetable = bytesToU16(raw[data : data+int(sz[f][1])])
+		data += int(sz[f][1])
+	}
+	for f := 0; f < files; f++ {
+		data = align64(data)
+		t.dtzBucket[f].precomp.data = raw[data:]
+		data += int(sz[f][2])
+	}
+	return nil
 }

@@ -129,8 +129,8 @@ type contHistTable [12][64][12][64]int32
 type corrHistTable [2][corrHistSize]int32
 
 const (
-	corrHistSize      = 1 << 14 // pawn-hash buckets per side
-	corrHistGrain     = 256     // fixed-point scale: stored corrections are centipawns * 256
+	corrHistSize      = 1 << 14            // pawn-hash buckets per side
+	corrHistGrain     = 256                // fixed-point scale: stored corrections are centipawns * 256
 	corrHistMax       = corrHistGrain * 64 // cap the correction at +/- 64 cp
 	corrHistWeightMax = 16                 // fastest adaptation weight (out of corrHistGrain) at high depth
 )
@@ -391,6 +391,21 @@ func (s *AlphaBetaSearch) Root() error {
 		}
 
 		s.responses <- fmt.Sprintf("info string searching for %s/%s (inc %s)", s.options.MoveTime, timeRemaining, increment)
+
+		// Syzygy root probe: when the root position is within tablebase range, the DTZ tables know the
+		// exact, fifty-move-rule-aware optimal move, so we play it directly instead of searching. This is
+		// what turns a known win into a forced conversion (the interior search only cuts off dead draws and
+		// would otherwise rely on its own mate detection to finish). Only the root is handled here; the
+		// interior search is left untouched. If the probe cannot decide (material not loaded, too many
+		// pieces, or any child probe fails) we fall through to the normal search.
+		if s.tb != nil &&
+			bits.OnesCount64(uint64(pos.Occupied[position.White]|pos.Occupied[position.Black])) <= s.tb.MaxPieces() {
+			if best, _, ok := s.tb.ProbeRoot(pos); ok && best != position.NoMove {
+				s.responses <- "info string syzygy: playing tablebase root move"
+				s.responses <- fmt.Sprintf("bestmove %s", best.String())
+				continue
+			}
+		}
 
 		// Lazy SMP: run several worker goroutines that share the transposition table. The main worker
 		// (id 0) reports info, applies the soft-time cutoff and produces the move; the others just help

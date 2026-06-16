@@ -40,6 +40,17 @@ type bucket struct {
 	norm    [tbPieces]uint8
 }
 
+// dtzBucket is the single-sided analogue of bucket used by DTZ tables. A .rtbz
+// stores only one side (recovered at probe time from flags&1), so there is no
+// [side] dimension. The shape otherwise matches bucket so the same encodePiece /
+// encodePawn / decompressPairs machinery applies unchanged.
+type dtzBucket struct {
+	precomp *pairsData
+	factor  [tbPieces]uint64
+	pieces  [tbPieces]uint8
+	norm    [tbPieces]uint8
+}
+
 // tbTable is a single loaded .rtbw material configuration.
 type tbTable struct {
 	ready     int32 // 1 once initTableWDL has parsed this table; read atomically on the probe hot path
@@ -59,6 +70,19 @@ type tbTable struct {
 
 	raw  []byte
 	name string
+
+	// DTZ (.rtbz) parsing. dtzReady mirrors `ready` but gates initTableDTZ
+	// independently: a table may be WDL-ready but not DTZ-ready. dtzRaw holds
+	// the .rtbz bytes (loaded eagerly in Load, parsed lazily in ensureReadyDTZ).
+	// dtzFiles is 1 (non-pawn, or single-file pawn) or 4. A DTZ table is
+	// single-sided, so a dtzBucket per file (file 0 for non-pawn) suffices.
+	dtzReady  int32
+	dtzRaw    []byte
+	dtzFiles  int
+	dtzBucket [4]*dtzBucket
+	dtzFlags  [4]uint8     // per-file flags returned by setupPairs (bit0=side, bit1=mapped, ...)
+	dtzMap    []byte       // raw[mapBase:]; the flat map[] re-encoding array (when any flag&2)
+	dtzMapIdx [4][4]uint16 // [file][wdl class]: byte offset into dtzMap of that sub-table's first entry
 }
 
 func le16(b []byte) uint32 { return uint32(binary.LittleEndian.Uint16(b)) }

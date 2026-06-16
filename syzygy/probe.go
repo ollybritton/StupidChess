@@ -14,6 +14,7 @@ type pos struct {
 	bishops, knights, pawns uint64
 	ep                      int  // en-passant target square, 0 if none
 	turn                    bool // true = white to move
+	rule50                  int  // halfmove clock; required by the DTZ probe
 }
 
 func popcount(b uint64) int  { return bits.OnesCount64(b) }
@@ -73,6 +74,32 @@ func getPieces(p *pos, code uint8) uint64 {
 	return 0
 }
 
+// tbSides computes (bside, cmirror, mirror) for a probe of table t at position
+// p with material key key. It is identical between probe_wdl_table and
+// probe_dtz_table in tbprobe.c, so both call it. cmirror (0/8) flips the colour
+// of the requested piece code; mirror (0/0x38) flips the square's rank for pawn
+// tables; bside selects which stored side to read.
+func tbSides(t *tbTable, p *pos, key uint64) (bside, cmirror, mirror int) {
+	if !t.symmetric {
+		if key != t.key {
+			cmirror = 8
+			mirror = 0x38
+			bside = b2i(p.turn)
+		} else {
+			cmirror, mirror = 0, 0
+			bside = b2i(!p.turn)
+		}
+	} else {
+		if p.turn {
+			cmirror, mirror = 0, 0
+		} else {
+			cmirror, mirror = 8, 0x38
+		}
+		bside = 0
+	}
+	return
+}
+
 // probeWDLTable ports probe_wdl_table. It returns the WDL value (-2..2) and
 // whether the probe succeeded.
 func (tb *Tablebases) probeWDLTable(p *pos) (int, bool) {
@@ -101,25 +128,7 @@ func (tb *Tablebases) probeWDLTable(p *pos) (int, bool) {
 		return 0, false
 	}
 
-	var bside int
-	var cmirror, mirror int
-	if !t.symmetric {
-		if key != t.key {
-			cmirror = 8
-			mirror = 0x38
-			bside = b2i(p.turn)
-		} else {
-			cmirror, mirror = 0, 0
-			bside = b2i(!p.turn)
-		}
-	} else {
-		if p.turn {
-			cmirror, mirror = 0, 0
-		} else {
-			cmirror, mirror = 8, 0x38
-		}
-		bside = 0
-	}
+	bside, cmirror, mirror := tbSides(t, p, key)
 
 	pArr := make([]int, tbPieces)
 
@@ -468,7 +477,9 @@ func doMove(p0 *pos, m tbMove) (pos, bool) {
 		case promKnight:
 			p.knights |= board(to)
 		}
+		p.rule50 = 0 // promotion
 	} else if board(from)&p0.pawns != 0 {
+		p.rule50 = 0 // pawn move
 		if rankOf(from) == 1 && rankOf(to) == 3 &&
 			pawnAttacks(from+8, true)&p0.pawns&p0.black != 0 {
 			p.ep = from + 8
@@ -487,6 +498,10 @@ func doMove(p0 *pos, m tbMove) (pos, bool) {
 			p.black &= mask
 			p.pawns &= mask
 		}
+	} else if board(to)&(p0.white|p0.black) != 0 {
+		p.rule50 = 0 // capture
+	} else {
+		p.rule50 = p0.rule50 + 1 // normal move
 	}
 	if !isLegal(&p) {
 		return p, false
@@ -606,4 +621,360 @@ func genPawnEPCaptures(p *pos, moves []tbMove) []tbMove {
 		}
 	}
 	return moves
+}
+
+// genPawnQuietsOrPromotions ports gen_pawn_quiets_or_promotions: all legal
+// non-capturing pawn pushes (including non-capturing promotions). Used by
+// probe_dtz_no_ep to look for a quiet pawn move that preserves the WDL value.
+func genPawnQuietsOrPromotions(p *pos, moves []tbMove) []tbMove {
+	occ := p.white | p.black
+	var us uint64
+	if p.turn {
+		us = p.white
+	} else {
+		us = p.black
+	}
+	for b := us & p.pawns; b != 0; b = poplsb(b) {
+		from := lsb(b)
+		var next int
+		if p.turn {
+			next = from + 8
+		} else {
+			next = from - 8
+		}
+		var att uint64
+		if board(next)&occ == 0 {
+			att |= board(next)
+			var next2 int
+			if p.turn {
+				next2 = from + 16
+			} else {
+				next2 = from - 16
+			}
+			if ((p.turn && rankOf(from) == 1) || (!p.turn && rankOf(from) == 6)) && board(next2)&occ == 0 {
+				att |= board(next2)
+			}
+		}
+		for ; att != 0; att = poplsb(att) {
+			to := lsb(att)
+			moves = addMove(moves, rankOf(to) == 7 || rankOf(to) == 0, from, to)
+		}
+	}
+	return moves
+}
+
+// --- DTZ probe ---
+
+// probeDTZTable ports probe_dtz_table (tbprobe.c). It returns the unsigned DTZ
+// magnitude contribution and a tri-state success flag matching the C *success
+// convention: 1 = ok, 0 = hard failure (table missing / illegal index), -1 =
+// soft failure (the requested side is not the stored side; the caller must fall
+// back to the move recursion in probeDTZNoEp). The sign of the result is applied
+// later by probeDTZNoEp from wdl; never signed here.
+func (tb *Tablebases) probeDTZTable(p *pos, wdl int) (res int, success int) {
+	key := calcKey(p, false)
+
+	t := tb.byKey[key]
+	if t == nil {
+		return 0, 0
+	}
+	// Same kingless / piece-count guards as probeWDLTable: a malformed index
+	// drives decompressPairs into a non-terminating bitstream.
+	if popcount(p.white|p.black) != t.num ||
+		popcount(p.kings&p.white) != 1 || popcount(p.kings&p.black) != 1 {
+		return 0, 0
+	}
+	if len(t.dtzRaw) == 0 {
+		return 0, 0
+	}
+	if err := tb.ensureReadyDTZ(t); err != nil {
+		return 0, 0
+	}
+
+	bside, cmirror, mirror := tbSides(t, p, key)
+
+	pArr := make([]int, tbPieces)
+
+	if !t.hasPawns {
+		if (t.dtzFlags[0]&1) != uint8(bside) && !t.symmetric {
+			return 0, -1
+		}
+		b := t.dtzBucket[0]
+		i := 0
+		for i < t.num {
+			bb := getPieces(p, b.pieces[i]^uint8(cmirror))
+			for bb != 0 {
+				pArr[i] = lsb(bb)
+				i++
+				bb = poplsb(bb)
+			}
+		}
+		idx := encodePiece(t.encType, t.num, b.norm[:], pArr, b.factor[:])
+		res = int(decompressPairs(b.precomp, idx))
+		if t.dtzFlags[0]&2 != 0 {
+			res = int(t.dtzMap[int(t.dtzMapIdx[0][wdlToMap[wdl+2]])+res])
+		}
+		if t.dtzFlags[0]&paFlags[wdl+2] == 0 || (wdl&1) != 0 {
+			res *= 2
+		}
+		return res, 1
+	}
+
+	// Pawn table.
+	k := t.dtzBucket[0].pieces[0] ^ uint8(cmirror)
+	bb := getPieces(p, k)
+	i := 0
+	for bb != 0 {
+		pArr[i] = lsb(bb) ^ mirror
+		i++
+		bb = poplsb(bb)
+	}
+	f := pawnFile(int(t.pawns[0]), pArr)
+	if (t.dtzFlags[f] & 1) != uint8(bside) {
+		return 0, -1
+	}
+	b := t.dtzBucket[f]
+	for i < t.num {
+		bb = getPieces(p, b.pieces[i]^uint8(cmirror))
+		for bb != 0 {
+			pArr[i] = lsb(bb) ^ mirror
+			i++
+			bb = poplsb(bb)
+		}
+	}
+	idx := encodePawn(t.num, int(t.pawns[0]), int(t.pawns[1]), b.norm[:], pArr, b.factor[:])
+	res = int(decompressPairs(b.precomp, idx))
+	if t.dtzFlags[f]&2 != 0 {
+		res = int(t.dtzMap[int(t.dtzMapIdx[f][wdlToMap[wdl+2]])+res])
+	}
+	if t.dtzFlags[f]&paFlags[wdl+2] == 0 || (wdl&1) != 0 {
+		res *= 2
+	}
+	return res, 1
+}
+
+// bestNone is BEST_NONE: the sentinel "no progressing move found yet" in the
+// win-side DTZ recursion.
+const bestNone = 0xffff
+
+// probeDTZNoEp ports probe_dtz_no_ep. *success follows the C convention (0 on
+// hard failure). The returned value is signed DTZ from the side-to-move
+// perspective, ignoring an en-passant possibility (handled by probeDTZ).
+func (tb *Tablebases) probeDTZNoEp(p *pos, success *int) int {
+	wdl := tb.probeAB(p, -2, 2, success)
+	if wdl == 0 {
+		return 0
+	}
+	if *success == 2 {
+		if wdl == 2 {
+			return 1
+		}
+		return 101
+	}
+
+	if wdl > 0 {
+		// A quiet pawn move (or non-capturing promotion) that keeps the same WDL
+		// gives DTZ 1 (win) or 101 (cursed win) directly.
+		var buf [256]tbMove
+		ms := genPawnQuietsOrPromotions(p, buf[:0])
+		for _, mv := range ms {
+			p1, ok := doMove(p, mv)
+			if !ok {
+				continue
+			}
+			var v int
+			if p1.ep == 0 {
+				v = -tb.probeAB(&p1, -2, -wdl+1, success)
+			} else {
+				v = -tb.probeWDLInternal(&p1, success)
+			}
+			if *success == 0 {
+				return 0
+			}
+			if v == wdl {
+				if v == 2 {
+					return 1
+				}
+				return 101
+			}
+		}
+	}
+
+	tres, ts := tb.probeDTZTable(p, wdl)
+	*success = ts
+	dtz := 1 + tres
+	if *success >= 0 {
+		if wdl&1 != 0 {
+			dtz += 100
+		}
+		if wdl >= 0 {
+			return dtz
+		}
+		return -dtz
+	}
+
+	// *success == -1: the DTZ for this side is not stored. Recurse over real
+	// moves, skipping zeroing moves (handled by the table directly).
+	if wdl > 0 {
+		best := bestNone
+		var buf [256]tbMove
+		ms := genMoves(p, buf[:0])
+		for _, mv := range ms {
+			p1, ok := doMove(p, mv)
+			if !ok {
+				continue
+			}
+			if p1.rule50 == 0 {
+				continue
+			}
+			v := -tb.probeDTZInternal(&p1, success)
+			if *success == 0 {
+				return 0
+			}
+			if v > 0 && v+1 < best {
+				best = v + 1
+			}
+		}
+		return best
+	}
+
+	best := -1
+	var buf [256]tbMove
+	ms := genMoves(p, buf[:0])
+	for _, mv := range ms {
+		p1, ok := doMove(p, mv)
+		if !ok {
+			continue
+		}
+		var v int
+		if p1.rule50 == 0 {
+			if wdl == -2 {
+				v = -1
+			} else {
+				v = tb.probeAB(&p1, 1, 2, success)
+				if v == 2 {
+					v = 0
+				} else {
+					v = -101
+				}
+			}
+		} else {
+			v = -tb.probeDTZInternal(&p1, success) - 1
+		}
+		if *success == 0 {
+			return 0
+		}
+		if v < best {
+			best = v
+		}
+	}
+	return best
+}
+
+// probeDTZInternal ports probe_dtz: probeDTZNoEp plus the en-passant correction.
+// It returns the signed DTZ (see the doc comment on ProbeDTZ for the convention)
+// and sets *success.
+func (tb *Tablebases) probeDTZInternal(p *pos, success *int) int {
+	*success = 1
+	v := tb.probeDTZNoEp(p, success)
+	if *success == 0 {
+		return 0
+	}
+	if p.ep == 0 {
+		return v
+	}
+
+	v1 := -3
+	var buf [2]tbMove
+	ms := genPawnEPCaptures(p, buf[:0])
+	for _, mv := range ms {
+		p1, ok := doMove(p, mv)
+		if !ok {
+			continue
+		}
+		v0 := -tb.probeAB(&p1, -2, 2, success)
+		if *success == 0 {
+			return 0
+		}
+		if v0 > v1 {
+			v1 = v0
+		}
+	}
+	if v1 > -3 {
+		v1 = wdlToDtz[v1+2]
+		switch {
+		case v < -100:
+			if v1 >= 0 {
+				v = v1
+			}
+		case v < 0:
+			if v1 >= 0 || v1 < -100 {
+				v = v1
+			}
+		case v > 100:
+			if v1 > 0 {
+				v = v1
+			}
+		case v > 0:
+			if v1 == 1 {
+				v = v1
+			}
+		default: // v == 0
+			if v1 >= 0 {
+				v = v1
+			} else {
+				// Only adopt the losing ep value if no legal non-ep move exists.
+				found := false
+				var mm [256]tbMove
+				all := genMoves(p, mm[:0])
+				for _, mv := range all {
+					if isEnPassant(p, mv) {
+						continue
+					}
+					if _, ok := doMove(p, mv); ok {
+						found = true
+						break
+					}
+				}
+				if !found {
+					v = v1
+				}
+			}
+		}
+	}
+	return v
+}
+
+// probeWDLInternal is probeWDL but threaded through an explicit *success, for use
+// inside the DTZ recursion (which must propagate hard failures).
+func (tb *Tablebases) probeWDLInternal(p *pos, success *int) int {
+	v, ok := tb.probeWDL(p)
+	if !ok {
+		*success = 0
+		return 0
+	}
+	return v
+}
+
+// probeDTZPos probes the internal *pos for its distance-to-zero from the
+// side-to-move perspective. It returns the signed DTZ and an ok flag.
+//
+// Sign / magnitude convention (matching de Man's probe_dtz):
+//
+//	      n < -100 : loss, but drawn under the 50-move rule
+//	-100 <= n < 0  : loss in n ply (assuming the 50-move counter is 0)
+//	       0       : draw
+//	  0 < n <= 100 : win in n ply (assuming the 50-move counter is 0)
+//	     n > 100   : win, but drawn under the 50-move rule
+//
+// The magnitude can be off by one (a returned n may mean a win/loss in n+1 ply)
+// except for positions exactly on the 50-move edge, exactly as the C contract
+// documents. The 50-move guard (dtz + rule50 <= 99/100) belongs to the caller.
+func (tb *Tablebases) probeDTZPos(p *pos) (dtz int, ok bool) {
+	success := 1
+	v := tb.probeDTZInternal(p, &success)
+	if success == 0 {
+		return 0, false
+	}
+	return v, true
 }

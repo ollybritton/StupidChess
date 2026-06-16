@@ -30,6 +30,15 @@ func probeFEN(t *testing.T, tb *Tablebases, fen string) (int, bool) {
 	return tb.ProbeWDL(p)
 }
 
+func probeDTZFEN(t *testing.T, tb *Tablebases, fen string) (int, bool) {
+	t.Helper()
+	p, err := position.NewPositionFromFEN(fen)
+	if err != nil {
+		t.Fatalf("bad FEN %q: %v", fen, err)
+	}
+	return tb.ProbeDTZ(p)
+}
+
 func TestLoad(t *testing.T) {
 	tb := loadTB(t)
 	if tb.MaxPieces() < 3 {
@@ -139,6 +148,72 @@ func TestProbesSucceedWithKnownValues(t *testing.T) {
 	}
 }
 
+// TestProbeDTZ asserts the DTZ probe succeeds (ok==true) and returns the exact
+// distance-to-zero verified against python-chess 1.11.2 on the same testdata.
+// The ten cases cover every DTZ code branch present in the fixtures: flags=0
+// direct values (KQvK/KRvK/KPvK), the flags=2 map path (KQvKR), single-valued
+// always-draw const tables (KBvK/KNvK), wins and a loss, and both stms. If any
+// of these regresses we fail loudly rather than skip.
+func TestProbeDTZ(t *testing.T) {
+	tb := loadTB(t)
+	cases := []struct {
+		name string
+		fen  string
+		want int
+	}{
+		{"KQvK win", "7k/8/8/8/8/1Q6/8/K7 w - - 0 1", 13},
+		{"KRvK win", "7k/8/8/8/8/1R6/8/K7 w - - 0 1", 21},
+		{"KBvK draw", "7k/8/8/8/8/1B6/8/K7 w - - 0 1", 0},
+		{"KNvK draw", "7k/8/8/8/3N4/8/8/K7 w - - 0 1", 0},
+		{"KPvK win (wtm)", "k7/8/8/8/8/8/4P3/K7 w - - 0 1", 9},
+		{"KPvK draw (btm)", "k7/8/8/8/8/8/4P3/K7 b - - 0 1", 0},
+		{"KPvK win (e-file)", "8/8/8/4k3/8/8/3PK3/8 w - - 0 1", 11},
+		{"KQvKR win", "8/2Q5/1K6/8/8/3k4/8/6r1 w - - 0 1", 43},
+		{"KQvKR win (btm)", "8/6K1/8/8/4r3/8/7Q/7k b - - 0 1", 1},
+		{"KQvKR loss (btm)", "7r/8/8/8/2Q5/8/K7/7k b - - 0 1", -42},
+	}
+	for _, c := range cases {
+		dtz, ok := probeDTZFEN(t, tb, c.fen)
+		if !ok {
+			t.Errorf("%s: ProbeDTZ returned ok=false for %q", c.name, c.fen)
+			continue
+		}
+		if dtz != c.want {
+			t.Errorf("%s: DTZ = %d, want %d", c.name, dtz, c.want)
+		}
+	}
+}
+
+// TestIllegalPositionIsRejectedAndDoesNotHangDTZ mirrors the WDL hang guard but
+// through ProbeDTZ: a malformed index drives the shared decompressPairs into a
+// non-terminating bitstream just as in the WDL path, so the kingless/piece-count
+// guards must reject illegal positions before encoding, and probing must finish.
+func TestIllegalPositionIsRejectedAndDoesNotHangDTZ(t *testing.T) {
+	tb := loadTB(t)
+	illegal := []string{
+		"7k/8/8/8/3B4/8/8/K7 w - - 0 1",   // bishop checks enemy king, wtm
+		"8/8/8/3k4/8/8/Q7/K1r5 b - - 0 1", // queen checks d5 king, btm
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, fen := range illegal {
+			p, err := position.NewPositionFromFEN(fen)
+			if err != nil {
+				continue
+			}
+			if _, ok := tb.ProbeDTZ(p); ok {
+				t.Errorf("illegal position %q: ProbeDTZ returned ok=true, want false", fen)
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ProbeDTZ did not terminate on an illegal position (infinite loop regression)")
+	}
+}
+
 // TestIllegalPositionIsRejectedAndDoesNotHang guards against two real bugs found
 // during hardening: (1) an illegal position (a side left in check, or a king that
 // is capturable) must return ok=false from the public API, and (2) probing must
@@ -152,7 +227,7 @@ func TestIllegalPositionIsRejectedAndDoesNotHang(t *testing.T) {
 	// left in check, so the position is illegal. This is the exact FEN that
 	// previously panicked then hung.
 	illegal := []string{
-		"7k/8/8/8/3B4/8/8/K7 w - - 0 1", // bishop checks enemy king, wtm
+		"7k/8/8/8/3B4/8/8/K7 w - - 0 1",   // bishop checks enemy king, wtm
 		"8/8/8/3k4/8/8/Q7/K1r5 b - - 0 1", // opposite check (queen checks d5 king)
 	}
 	done := make(chan struct{})

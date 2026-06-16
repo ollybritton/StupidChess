@@ -87,6 +87,36 @@ func Load(dir string) (*Tablebases, error) {
 		}
 	}
 
+	// Attach DTZ (.rtbz) bytes to the already-built tables. A .rtbw and its
+	// sibling .rtbz share a material key, so we look up the existing table by
+	// key and store the bytes for lazy parsing. We deliberately do not create a
+	// separate tbTable for DTZ.
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if !strings.HasSuffix(n, ".rtbz") {
+			continue
+		}
+		base := strings.TrimSuffix(n, ".rtbz")
+		_, key, _, _, _, _, _, perr := parseName(base)
+		if perr != nil {
+			continue
+		}
+		t := tb.byKey[key]
+		if t == nil {
+			// A .rtbz without a matching .rtbw: skip it. DTZ probing relies on
+			// the WDL table for the same material, so an orphan DTZ is unusable.
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, n))
+		if err != nil {
+			return nil, fmt.Errorf("syzygy: reading %s: %w", n, err)
+		}
+		t.dtzRaw = raw
+	}
+
 	return tb, nil
 }
 
@@ -109,6 +139,26 @@ func (tb *Tablebases) ensureReady(t *tbTable) error {
 		return err
 	}
 	atomic.StoreInt32(&t.ready, 1)
+	return nil
+}
+
+// ensureReadyDTZ lazily parses a table's DTZ (.rtbz) structure on first use,
+// mirroring ensureReady but gating on the separate dtzReady atomic (a table can
+// be WDL-ready without being DTZ-ready). The caller must have verified that
+// t.dtzRaw is non-empty.
+func (tb *Tablebases) ensureReadyDTZ(t *tbTable) error {
+	if atomic.LoadInt32(&t.dtzReady) != 0 {
+		return nil
+	}
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if atomic.LoadInt32(&t.dtzReady) != 0 { // re-check after acquiring the lock
+		return nil
+	}
+	if err := t.initTableDTZ(); err != nil {
+		return err
+	}
+	atomic.StoreInt32(&t.dtzReady, 1)
 	return nil
 }
 
@@ -138,6 +188,30 @@ func (tb *Tablebases) ProbeWDL(p *position.Position) (wdl int, ok bool) {
 	return tb.probeWDL(&pc)
 }
 
+// ProbeDTZ probes the position for its distance-to-zero from the side-to-move
+// perspective. See the doc comment on (*Tablebases).ProbeDTZ(*pos) for the exact
+// sign/magnitude convention. ok is false when the material (WDL or DTZ) is not
+// loaded, exceeds MaxPieces, or the position has castling rights / is illegal.
+//
+// The position's HalfmoveClock is threaded through as rule50; it is the caller's
+// responsibility to apply the 50-move guard (dtz + rule50 <= 99/100) to a
+// returned win.
+func (tb *Tablebases) ProbeDTZ(p *position.Position) (dtz int, ok bool) {
+	if p.Castling != 0 {
+		return 0, false
+	}
+
+	pc := positionToPos(p)
+	if popcount(pc.white|pc.black) > tb.maxPieces {
+		return 0, false
+	}
+	if !probeLegal(&pc) {
+		return 0, false
+	}
+
+	return tb.probeDTZPos(&pc)
+}
+
 // positionToPos converts the engine's Position into the internal bitboard pos.
 // The engine already uses a1=bit0..h8=bit63 layout, matching Syzygy.
 func positionToPos(p *position.Position) pos {
@@ -156,5 +230,8 @@ func positionToPos(p *position.Position) pos {
 	} else {
 		pc.ep = 0
 	}
+	// rule50 (the halfmove clock) is required by the DTZ probe and is harmless
+	// to the WDL path, which ignores it.
+	pc.rule50 = int(p.HalfmoveClock)
 	return pc
 }
